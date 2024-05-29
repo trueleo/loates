@@ -41,7 +41,7 @@ where
 ///
 /// ### Generic types and their constraints
 ///
-/// - `Args` must implement the [Extractor](crate::data::Extractor) trait and is `Send`.
+/// - `Args` must implement the [Extractor] trait and is `Send`.
 /// - `U` must be a User type and must have a lifetime bound of `'a`.
 ///
 pub trait AsyncUserBuilder<Args, U>: Sync {
