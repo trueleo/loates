@@ -34,7 +34,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use http::StatusCode;
-
+use rusher::data::RuntimeDataStore;
 use rusher::logical::{ExecutionPlan, Executor, Scenario};
 use rusher::report::Report;
 use rusher::runner::{Config, Runner};
@@ -42,6 +42,14 @@ use rusher::{User, UserResult};
 
 #[derive(Default)]
 struct MyUser;
+
+#[async_trait::async_trait]
+impl User for MyUser {
+    async fn call(&mut self) -> UserResult {
+        // testcase here
+        Ok(Report::new(StatusCode::OK))
+    }
+}
 
 fn datastore(store: &mut RuntimeDataStore) {
     store.insert(TypeId::of::<String>(), Box::new("hello".to_string()));
