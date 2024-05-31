@@ -8,7 +8,7 @@ use crate::{
     User,
 };
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum Executor {
     Once,
     Constant {
@@ -44,6 +44,7 @@ pub enum Executor {
 
 #[async_trait::async_trait]
 pub trait ExecutionProvider {
+    fn name(&self) -> String;
     async fn execution<'a>(
         &'a self,
         ctx: &'a mut ExecutionRuntimeCtx,
@@ -51,12 +52,14 @@ pub trait ExecutionProvider {
 }
 
 pub struct Scenario<'env> {
+    pub(crate) name: String,
     pub(crate) execution_provider: Vec<Box<dyn ExecutionProvider + 'env>>,
 }
 
 impl<'env> Scenario<'env> {
-    pub fn new<T: ExecutionProvider + 'env>(execution: T) -> Self {
+    pub fn new<T: ExecutionProvider + 'env>(name: String, execution: T) -> Self {
         Self {
+            name,
             execution_provider: vec![Box::new(execution)],
         }
     }
@@ -128,6 +131,34 @@ where
     U: User,
     Args: for<'a> Extractor<'a> + Send + Sync,
 {
+    fn name(&self) -> String {
+        match &self.executor {
+            Executor::Once => "Once".to_string(),
+            Executor::Constant { users, duration } => {
+                format!("Constant {} users {:?}", users, duration)
+            }
+            Executor::Shared {
+                users, iterations, ..
+            } => format!("Shared {} users {}", users, iterations),
+            Executor::PerUser { users, iterations } => {
+                format!("PerUser {} users {}", users, iterations)
+            }
+            Executor::ConstantArrivalRate {
+                rate,
+                time_unit,
+                duration,
+                ..
+            } => format!(
+                "ConstantArrivalRate {}/{:?} for {:?}",
+                rate, time_unit, duration
+            ),
+            Executor::RampingUser { stages, .. } => format!("RampingUser stages {}", stages.len()),
+            Executor::RampingArrivalRate { stages, .. } => {
+                format!("RampingArrivalRate stages {}", stages.len())
+            }
+        }
+    }
+
     async fn execution<'a>(
         &'a self,
         ctx: &'a mut ExecutionRuntimeCtx,

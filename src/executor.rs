@@ -6,6 +6,7 @@ use std::{
 };
 
 use futures::Future;
+use tracing::Instrument;
 
 use crate::{
     data::{Extractor, RuntimeDataStore},
@@ -160,10 +161,12 @@ where
         let task = async move {
             let spawner = async_scoped::spawner::use_tokio::Tokio;
             let mut scope = unsafe { async_scoped::TokioScope::create(spawner) };
+            let span = tracing::span!(target: "rusher", tracing::Level::INFO, "task");
             scope.spawn_cancellable(
                 async move {
                     let _ = tx.unbounded_send(task.await);
-                },
+                }
+                .instrument(span),
                 || (),
             );
             let _ = scope.collect().await;
@@ -203,7 +206,8 @@ where
             let spawner = async_scoped::spawner::use_tokio::Tokio;
             let mut scope = unsafe { async_scoped::TokioScope::create(spawner) };
             for task in tasks {
-                scope.spawn_cancellable(task, || ());
+                let span = tracing::span!(tracing::Level::INFO, "task");
+                scope.spawn_cancellable(task.instrument(span), || ());
             }
             let _ = scope.collect().await;
         };
@@ -258,7 +262,8 @@ where
             let spawner = async_scoped::spawner::use_tokio::Tokio;
             let mut scope = unsafe { async_scoped::TokioScope::create(spawner) };
             for task in tasks {
-                scope.spawn_cancellable(task, || ());
+                let span = tracing::span!(tracing::Level::INFO, "task");
+                scope.spawn_cancellable(task.instrument(span), || ());
             }
             let _ = scope.collect().await;
         };
@@ -299,7 +304,8 @@ where
             let spawner = async_scoped::spawner::use_tokio::Tokio;
             let mut scope = unsafe { async_scoped::TokioScope::create(spawner) };
             for task in tasks {
-                scope.spawn_cancellable(task, || ());
+                let span = tracing::span!(tracing::Level::INFO, "task");
+                scope.spawn_cancellable(task.instrument(span), || ());
             }
             let _ = scope.collect().await;
         };
@@ -382,7 +388,8 @@ where
                 let spawner = async_scoped::spawner::use_tokio::Tokio;
                 let mut scope = unsafe { async_scoped::TokioScope::create(spawner) };
                 tasks.into_iter().for_each(|task| {
-                    scope.spawn_cancellable(task, || ());
+                    let span = tracing::span!(tracing::Level::INFO, "task");
+                    scope.spawn_cancellable(task.instrument(span), || ());
                 });
                 let _ = scope.collect().await;
             }
@@ -467,7 +474,8 @@ where
                         let task = async move {
                             let _ = tx.unbounded_send(user.call().await);
                         };
-                        scope.spawn_cancellable(task, || ());
+                        let span = tracing::span!(tracing::Level::INFO, "task");
+                        scope.spawn_cancellable(task.instrument(span), || ());
                         current_rate += 1;
                     }
 

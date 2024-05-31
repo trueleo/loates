@@ -5,6 +5,7 @@ pub mod executor;
 pub mod logical;
 pub mod report;
 pub mod runner;
+pub mod tracing;
 pub mod user;
 
 pub use crate::logical::Scenario;

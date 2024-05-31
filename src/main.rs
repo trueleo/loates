@@ -1,21 +1,22 @@
 use std::any::TypeId;
-use std::time::Duration;
 
 use futures::StreamExt;
-use http::StatusCode;
 use rusher::data::RuntimeDataStore;
 use rusher::logical::{ExecutionPlan, Executor, Scenario};
 use rusher::report::Report;
 use rusher::runner::{Config, Runner};
 use rusher::{User, UserResult};
+use tracing_forest::util::LevelFilter;
+use tracing_subscriber::layer::SubscriberExt;
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct MyUser;
 
 #[async_trait::async_trait]
 impl User for MyUser {
     async fn call(&mut self) -> UserResult {
-        Ok(Report::new(StatusCode::OK))
+        let res = reqwest::get("https://example.org").await.unwrap();
+        Ok(Report::new(res.status()))
     }
 }
 
@@ -25,23 +26,32 @@ fn datastore(store: &mut RuntimeDataStore) {
 
 #[tokio::main]
 async fn main() {
+    let (tracer, mut rx_tracer) = rusher::tracing::TraceHttp::new();
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(LevelFilter::TRACE)
+        .finish()
+        .with(tracer);
+
+    let _ = tracing::subscriber::set_global_default(subscriber);
+
     let user_builder = || MyUser;
     let execution = ExecutionPlan::builder()
         .with_user_builder(&user_builder)
         .with_data(datastore)
-        .with_executor(Executor::ConstantArrivalRate {
-            pre_allocate_users: 1,
-            rate: 1,
-            time_unit: Duration::from_secs(1),
-            max_users: 1,
-            duration: Duration::from_secs(20),
-        });
-    let scenario = Scenario::new(execution);
-    let (runtime, mut rx) = Runner::new(Config {}, vec![scenario]);
+        .with_executor(Executor::Once);
+    let scenario = Scenario::new("scene1".to_string(), execution);
+    let (runtime, mut rx_report) = Runner::new(Config {}, vec![scenario]);
     tokio::spawn(async move {
-        while let Some(item) = rx.next().await {
+        while let Some(item) = rx_report.next().await {
             println!("{:?}", item)
         }
     });
+
+    tokio::spawn(async move {
+        while let Some(item) = rx_tracer.next().await {
+            println!("{:?}", item)
+        }
+    });
+
     runtime.run().await.unwrap();
 }
