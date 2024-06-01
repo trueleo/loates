@@ -1,12 +1,14 @@
 use std::any::TypeId;
 
 use futures::StreamExt;
+use http::StatusCode;
 use rusher::data::RuntimeDataStore;
 use rusher::logical::{ExecutionPlan, Executor, Scenario};
 use rusher::report::Report;
 use rusher::runner::{Config, Runner};
 use rusher::{User, UserResult};
-use tracing_forest::util::LevelFilter;
+use tracing::level_filters::LevelFilter;
+use tracing::{event, Level};
 use tracing_subscriber::layer::SubscriberExt;
 
 #[derive(Debug, Default)]
@@ -15,8 +17,12 @@ struct MyUser;
 #[async_trait::async_trait]
 impl User for MyUser {
     async fn call(&mut self) -> UserResult {
-        let res = reqwest::get("https://example.org").await.unwrap();
-        Ok(Report::new(res.status()))
+        event!(name: "plank", target: "load_test", Level::INFO, attar = 1);
+        tokio::task::yield_now().await;
+        event!(name: "plank", target: "load_test", Level::INFO, attar = 2);
+        tokio::task::yield_now().await;
+        event!(name: "plank", target: "load_test", Level::INFO, attar = 3);
+        Ok(Report::new(StatusCode::OK))
     }
 }
 

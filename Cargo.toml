@@ -27,5 +27,3 @@ reqwest = { version = "0.12.4", default-features = false, features = [
     "rustls-tls",
     "charset",
 ] }
-
-tracing-forest = { version = "0.1.6", features = ["full"] }
