@@ -1,6 +1,4 @@
-use miette::Diagnostic;
-
-#[derive(Debug, thiserror::Error, Diagnostic)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Oops")]
     GenericError(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),

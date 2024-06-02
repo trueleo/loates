@@ -5,7 +5,7 @@ use crate::{error::Error, logical};
 
 use async_scoped::{self, Scope};
 use futures::StreamExt as _;
-use tracing::Instrument;
+use tracing::{event, Instrument, Level};
 
 /// The Runner struct is the top level struct for managing and executing series of logical scenarios asynchronously.
 pub struct Runner<'a> {
@@ -74,7 +74,12 @@ impl<'a> Runner<'a> {
             Scope::collect(&mut scope).await;
         }
 
+        event!(name: "runner_exit", target: "rusher", tracing::Level::INFO, "Exit test");
         Ok(())
+    }
+
+    pub fn scenario(&self) -> &[logical::Scenario<'a>] {
+        &self.logical.scenarios
     }
 }
 

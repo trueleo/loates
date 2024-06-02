@@ -6,7 +6,7 @@ use std::{
 };
 
 use futures::Future;
-use tracing::Instrument;
+use tracing::{event, Instrument, Level};
 
 use crate::{
     data::{Extractor, RuntimeDataStore},
@@ -162,9 +162,11 @@ where
             let spawner = async_scoped::spawner::use_tokio::Tokio;
             let mut scope = unsafe { async_scoped::TokioScope::create(spawner) };
             let span = tracing::span!(target: "rusher", tracing::Level::INFO, "task");
+            event!(name: "vus", target: "rusher", Level::INFO, vus = 1u64, vus_max = 1u64);
             scope.spawn_cancellable(
                 async move {
                     let _ = tx.unbounded_send(task.await);
+                    event!(name: "iterations", target: "rusher", Level::INFO, iterations = 1u64);
                 }
                 .instrument(span),
                 || (),

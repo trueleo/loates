@@ -1,4 +1,5 @@
 use std::any::TypeId;
+use std::thread;
 
 use futures::StreamExt;
 use http::StatusCode;
@@ -7,9 +8,9 @@ use rusher::logical::{ExecutionPlan, Executor, Scenario};
 use rusher::report::Report;
 use rusher::runner::{Config, Runner};
 use rusher::{User, UserResult};
-use tracing::level_filters::LevelFilter;
 use tracing::{event, Level};
 use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::Registry;
 
 #[derive(Debug, Default)]
 struct MyUser;
@@ -32,12 +33,8 @@ fn datastore(store: &mut RuntimeDataStore) {
 
 #[tokio::main]
 async fn main() {
-    let (tracer, mut rx_tracer) = rusher::tracing::TraceHttp::new();
-    let subscriber = tracing_subscriber::fmt()
-        .with_max_level(LevelFilter::TRACE)
-        .finish()
-        .with(tracer);
-
+    let (tracer, rx_tracer) = rusher::tracing::TraceHttp::new();
+    let subscriber = Registry::default().with(tracer);
     let _ = tracing::subscriber::set_global_default(subscriber);
 
     let user_builder = || MyUser;
@@ -46,18 +43,12 @@ async fn main() {
         .with_data(datastore)
         .with_executor(Executor::Once);
     let scenario = Scenario::new("scene1".to_string(), execution);
-    let (runtime, mut rx_report) = Runner::new(Config {}, vec![scenario]);
-    tokio::spawn(async move {
-        while let Some(item) = rx_report.next().await {
-            println!("{:?}", item)
-        }
-    });
-
-    tokio::spawn(async move {
-        while let Some(item) = rx_tracer.next().await {
-            println!("{:?}", item)
-        }
-    });
-
+    let cli_scenario = [&scenario]
+        .iter()
+        .map(|scenario| rusher::tui::Scenario::new_from_scenario(scenario))
+        .collect();
+    let tui = thread::spawn(|| rusher::tui::run(rx_tracer, cli_scenario));
+    let (runtime, _) = Runner::new(Config {}, vec![scenario]);
     runtime.run().await.unwrap();
+    tui.join().unwrap().unwrap();
 }

@@ -1,15 +1,18 @@
 use std::{
     fmt::Write as _,
+    ops::ControlFlow,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
 use tracing::{
     field::{Field, Visit},
-    span,
+    span, Subscriber,
 };
 
 use tracing_subscriber::{registry::LookupSpan, Layer};
 
+/// Represents scalar values that are allowed to be in a user event's attribute set.
 #[derive(Debug)]
 pub enum Value {
     String(String),
@@ -17,62 +20,67 @@ pub enum Value {
     Float(f64),
 }
 
+/// Group of events that has occured inside of a user call grouped by event name
 #[derive(Debug)]
-pub struct EventData {
-    name: String,
-    values: Vec<(String, Value)>,
+pub struct TaskEventData {
+    name: Arc<str>,
+    values: Vec<(&'static str, Value)>,
 }
 
-impl Visit for EventData {
+impl Visit for TaskEventData {
     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-        self.values.push((
-            field.name().to_string(),
-            Value::String(format!("{:?}", value)),
-        ))
+        self.values
+            .push((field.name(), Value::String(format!("{:?}", value))))
     }
 
     fn record_u64(&mut self, field: &Field, value: u64) {
         self.values
-            .push((field.name().to_string(), Value::Number(value as i64)))
+            .push((field.name(), Value::Number(value as i64)))
     }
 
     fn record_i64(&mut self, field: &Field, value: i64) {
-        self.values
-            .push((field.name().to_string(), Value::Number(value)))
+        self.values.push((field.name(), Value::Number(value)))
     }
 }
 
+/// Tracked data that is associated with a task
 #[derive(Debug)]
 struct TaskData {
     instant: Instant,
-    exec: String,
-    scenario: String,
-    events: Vec<EventData>,
+    exec: Arc<str>,
+    scenario: Arc<str>,
+    events: Vec<TaskEventData>,
 }
 
-impl TaskData {
-    fn default() -> Self {
-        Self {
-            instant: Instant::now(),
-            exec: "".to_string(),
-            scenario: "".to_string(),
-            events: vec![],
-        }
-    }
+/// Tracked data associated with span of an execution.
+#[derive(Debug)]
+struct ExecutionData {
+    name: Arc<str>,
+    vus: u64,
+    max_vus: u64,
+    iterations: u64,
 }
 
-struct ExecData {
-    name: String,
-}
+impl tracing::field::Visit for ExecutionData {
+    fn record_debug(&mut self, _: &Field, _: &dyn std::fmt::Debug) {}
 
-impl tracing::field::Visit for ExecData {
-    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+    fn record_str(&mut self, field: &Field, value: &str) {
         if field.name() == "name" {
-            write!(self.name, "{:?}", value).unwrap()
+            self.name = value.into();
+        }
+    }
+
+    fn record_u64(&mut self, field: &Field, value: u64) {
+        match field.name() {
+            "vus" => self.vus += value,
+            "vus_max" => self.max_vus += value,
+            "iterations" => self.iterations += value,
+            _ => (),
         }
     }
 }
 
+/// Tracked data associated with a span of a scenario .
 struct ScenarioData {
     name: String,
 }
@@ -85,19 +93,28 @@ impl tracing::field::Visit for ScenarioData {
     }
 }
 
+/// Output Message genenerated by this tracing layer
 #[derive(Debug)]
 pub enum Message {
     TaskTime {
-        exec_name: String,
-        scenario_name: String,
+        exec_name: Arc<str>,
+        scenario_name: Arc<str>,
         duration: Duration,
-        events: Vec<EventData>,
+        events: Vec<TaskEventData>,
+    },
+    ExecutorUpdate {
+        name: Arc<str>,
+        vus: u64,
+        max_vus: u64,
+        iterations: u64,
     },
     ScenarioChanged {
         scenario_name: String,
     },
+    End,
 }
 
+// Tracing layer that tracks and generates message based on this crate's tracing events
 pub struct TraceHttp {
     // current_scenario: Mutex<String>,
     stats_sender: crate::Sender<Message>,
@@ -136,7 +153,7 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
                     return;
                 };
                 let extensions = &exec_span.extensions();
-                let exec_name = extensions.get::<ExecData>().unwrap();
+                let exec_name = extensions.get::<ExecutionData>().unwrap();
 
                 let Some(scenario_span) = exec_span.parent() else {
                     return;
@@ -147,14 +164,17 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
                 let mut extentions = span.extensions_mut();
                 extentions.insert(TaskData {
                     instant: Instant::now(),
-                    exec: exec_name.name.to_string(),
-                    scenario: scenario_name.name.to_string(),
+                    exec: exec_name.name.to_string().into(),
+                    scenario: scenario_name.name.to_string().into(),
                     events: Vec::default(),
                 });
             }
             "exec" => {
-                let mut visitor = ExecData {
-                    name: "".to_string(),
+                let mut visitor = ExecutionData {
+                    name: "".to_string().into(),
+                    vus: 0,
+                    max_vus: 0,
+                    iterations: 0,
                 };
                 attr.values().record(&mut visitor);
                 let mut extentions = span.extensions_mut();
@@ -173,35 +193,19 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
     }
 
     fn on_event(&self, event: &tracing::Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        if event.metadata().target() != "load_test" {
+        if event.metadata().target() == "rusher" && event.metadata().name() == "runner_exit" {
+            let _ = self.stats_sender.unbounded_send(Message::End);
+        }
+        if let ControlFlow::Continue(exec_data) = handle_crate_execution_event(event, &ctx) {
+            let _ = self.stats_sender.unbounded_send(Message::ExecutorUpdate {
+                name: exec_data.name,
+                vus: exec_data.vus,
+                max_vus: exec_data.max_vus,
+                iterations: exec_data.iterations,
+            });
             return;
         }
-        let Some(parent) = ctx.current_span().id().and_then(|id| ctx.span(id)) else {
-            return;
-        };
-
-        let Some(task_parent) = parent.scope().find(|span| span.name() == "task") else {
-            return;
-        };
-        let mut task_ext = task_parent.extensions_mut();
-        let Some(task_data) = task_ext.get_mut::<TaskData>() else {
-            return;
-        };
-
-        if let Some(data) = task_data
-            .events
-            .iter_mut()
-            .find(|data| data.name == event.metadata().name())
-        {
-            event.record(data);
-        } else {
-            let mut event_data = EventData {
-                name: event.metadata().name().to_string(),
-                values: vec![],
-            };
-            event.record(&mut event_data);
-            task_data.events.push(event_data);
-        }
+        if let ControlFlow::Continue(()) = handle_user_event(event, &ctx) {}
     }
 
     fn on_close(&self, id: span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
@@ -210,12 +214,73 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
         let Some(task_data) = extention.get_mut::<TaskData>() else {
             return;
         };
-        let task_data = std::mem::replace(task_data, TaskData::default());
+        let events = std::mem::take(&mut task_data.events);
         let _ = self.stats_sender.unbounded_send(Message::TaskTime {
-            exec_name: task_data.exec,
-            scenario_name: task_data.scenario,
+            exec_name: task_data.exec.clone(),
+            scenario_name: task_data.scenario.clone(),
             duration: task_data.instant.elapsed(),
-            events: task_data.events,
+            events,
         });
     }
+}
+
+fn handle_user_event<S: Subscriber + for<'a> LookupSpan<'a>>(
+    event: &tracing::Event,
+    ctx: &tracing_subscriber::layer::Context<S>,
+) -> ControlFlow<()> {
+    if event.metadata().target() != "load_test" {
+        return ControlFlow::Break(());
+    }
+    let Some(parent) = ctx.current_span().id().and_then(|id| ctx.span(id)) else {
+        return ControlFlow::Break(());
+    };
+    let Some(task_parent) = parent.scope().find(|span| span.name() == "task") else {
+        return ControlFlow::Break(());
+    };
+    let mut task_ext = task_parent.extensions_mut();
+    let Some(task_data) = task_ext.get_mut::<TaskData>() else {
+        return ControlFlow::Break(());
+    };
+
+    if let Some(data) = task_data
+        .events
+        .iter_mut()
+        .find(|data| &*data.name == event.metadata().name())
+    {
+        event.record(data);
+    } else {
+        let mut event_data = TaskEventData {
+            name: event.metadata().name().to_string().into(),
+            values: vec![],
+        };
+        event.record(&mut event_data);
+        task_data.events.push(event_data);
+    }
+    ControlFlow::Continue(())
+}
+
+fn handle_crate_execution_event<S: Subscriber + for<'a> LookupSpan<'a>>(
+    event: &tracing::Event,
+    ctx: &tracing_subscriber::layer::Context<S>,
+) -> ControlFlow<(), ExecutionData> {
+    if event.metadata().target() != "rusher" {
+        return ControlFlow::Break(());
+    }
+    let Some(parent) = ctx.current_span().id().and_then(|id| ctx.span(id)) else {
+        return ControlFlow::Break(());
+    };
+    let Some(exec_span) = parent.scope().find(|span| span.name() == "exec") else {
+        return ControlFlow::Break(());
+    };
+    let mut exec_ext = exec_span.extensions_mut();
+    let Some(exec_data) = exec_ext.get_mut::<ExecutionData>() else {
+        return ControlFlow::Break(());
+    };
+    event.record(exec_data);
+    ControlFlow::Continue(ExecutionData {
+        name: Arc::clone(&exec_data.name),
+        vus: exec_data.vus,
+        max_vus: exec_data.max_vus,
+        iterations: exec_data.iterations,
+    })
 }

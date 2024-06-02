@@ -6,6 +6,8 @@ pub mod logical;
 pub mod report;
 pub mod runner;
 pub mod tracing;
+#[cfg(feature = "tui")]
+pub mod tui;
 pub mod user;
 
 pub use crate::logical::Scenario;
