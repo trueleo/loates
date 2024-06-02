@@ -1,5 +1,6 @@
 use std::{
     error::Error,
+    fmt::Write,
     io,
     sync::mpsc,
     thread,
@@ -8,11 +9,11 @@ use std::{
 
 use ratatui::{
     backend::{Backend, CrosstermBackend},
-    layout::{Alignment, Constraint, Layout, Margin, Rect},
+    layout::{Constraint, Layout, Rect},
     style::Stylize,
     terminal::{Frame, Terminal, Viewport},
     text::{Line, Span, Text},
-    widgets::{block, Block, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph},
     TerminalOptions,
 };
 
@@ -22,8 +23,15 @@ const LOGO: &str = "\
 ║╚═╝║║║ ║║║╚══╗║╚═╝║║╚══╗║╚═╝║
 ║╔╗╔╝║║ ║║╚══╗║║╔═╗║║╔══╝║╔╗╔╝
 ║║║╚╗║╚═╝║║╚═╝║║║ ║║║╚══╗║║║╚╗
-╚╝╚═╝╚═══╝╚═══╝╚╝ ╚╝╚═══╝╚╝╚═╝
+╚╝╚═╝╚═══╝╚═══╝╚╝ ╚╝╚═══╝╚╝╚═╝\
 ";
+
+const BUNNY: &str = "  //
+ ('>
+ /rr
+*\\))_";
+
+const INFO_CELL_SIZE: usize = 15;
 
 enum Event {
     Input(crossterm::event::KeyEvent),
@@ -63,6 +71,22 @@ impl Scenario {
         Self { name, execs }
     }
 
+    fn exec_names(&self) -> impl Iterator<Item = &str> {
+        self.execs.iter().map(|x| &*x.name)
+    }
+
+    fn total_iterations_completed(&self) -> u64 {
+        self.execs.iter().map(|x| x.iterations).sum()
+    }
+
+    fn total_vus(&self) -> u64 {
+        self.execs.iter().map(|x| x.vus).sum()
+    }
+
+    fn total_max_vus(&self) -> u64 {
+        self.execs.iter().map(|x| x.max_vus).sum()
+    }
+
     fn update(&mut self, message: &crate::tracing::Message) {
         match message {
             crate::tracing::Message::TaskTime {
@@ -96,6 +120,12 @@ impl Scenario {
 struct App {
     current_scenario: usize,
     scenarios: Vec<Scenario>,
+}
+
+impl App {
+    fn current_scenario(&self) -> &Scenario {
+        &self.scenarios[self.current_scenario]
+    }
 }
 
 pub fn run(
@@ -210,18 +240,7 @@ fn run_app<B: Backend>(
 }
 
 fn ui(f: &mut Frame, app: &App) {
-    let currrent_scenario = &app.scenarios[app.current_scenario];
-    let executor_names = currrent_scenario
-        .execs
-        .iter()
-        .map(|x| x.name.as_str())
-        .collect::<Vec<_>>();
-    let iterations = currrent_scenario
-        .execs
-        .iter()
-        .map(|x| x.iterations)
-        .sum::<u64>();
-
+    let currrent_scenario = app.current_scenario();
     let area = f.size();
 
     let scenario_text = Text::from(vec![Line::from(vec![
@@ -230,13 +249,14 @@ fn ui(f: &mut Frame, app: &App) {
     ])]);
     let executor_title = Line::from("Executors: ".to_string().bold());
     let mut executors_text = Text::from(executor_title);
-    for exec in executor_names {
+    for exec in currrent_scenario.exec_names() {
         executors_text.push_line(Line::from_iter([Span::from("* ").bold(), Span::raw(exec)]))
     }
-    let iteration_text = Text::from(iterations.to_string());
-    let average_time = currrent_scenario.execs[0].task_total_time.as_secs_f64()
-        / currrent_scenario.execs[0].iterations as f64;
-    let max_time = currrent_scenario.execs[0].task_max_time.as_secs_f64();
+    let average_time = currrent_scenario.execs[0]
+        .task_total_time
+        .checked_div(currrent_scenario.execs[0].iterations as u32)
+        .unwrap_or_default();
+    let max_time = currrent_scenario.execs[0].task_max_time;
 
     // No margins here. Margins are applied by children of the main area
     let [left_area, other_info] =
@@ -252,38 +272,98 @@ fn ui(f: &mut Frame, app: &App) {
     // Left Area
     let [logo_area, scenario_area, executors_area] = Layout::vertical([
         Constraint::Length(7),
-        Constraint::Length(3),
+        Constraint::Length(1),
         Constraint::Min(0),
     ])
     .vertical_margin(1)
     .horizontal_margin(2)
     .areas(left_area);
-    let scenario_area = scenario_area.inner(&Margin::new(0, 1));
+
+    let bunny_text = Text::from(BUNNY);
+    let bunny_area = Rect::new(
+        executors_area.x + executors_area.width - bunny_text.width() as u16,
+        executors_area.y + executors_area.height - bunny_text.height() as u16,
+        bunny_text.width() as u16,
+        bunny_text.height() as u16,
+    );
+
+    if (executors_area.width as usize).saturating_sub(executors_text.width()) >= bunny_text.width()
+        || (executors_area.height as usize).saturating_sub(executors_text.height())
+            >= bunny_text.height()
+    {
+        f.render_widget(bunny_text, bunny_area);
+    }
 
     f.render_widget(Paragraph::new(LOGO), logo_area);
+    f.render_widget(Block::bordered().borders(Borders::BOTTOM), logo_area);
     f.render_widget(scenario_text, scenario_area);
     f.render_widget(executors_text, executors_area);
 
-    let other_areas = Layout::vertical(Constraint::from_lengths([1, 1, 1, 1, 1]))
-        .margin(1)
-        .split(other_info);
+    let total_vus_formatted = currrent_scenario.total_vus().to_string();
+    let total_max_vus_formatted = currrent_scenario.total_max_vus().to_string();
+    let average_time_formatted = format!("{:?}", average_time);
+    let max_time_formatted = format!("{:?}", max_time);
+    let total_iterations_completed_formattted =
+        currrent_scenario.total_iterations_completed().to_string();
 
-    f.render_widget(
-        Paragraph::new(format!("vus: {}", currrent_scenario.execs[0].vus)),
-        other_areas[0],
-    );
-    f.render_widget(
-        Paragraph::new(format!("max_vus: {}", currrent_scenario.execs[0].max_vus)),
-        other_areas[1],
-    );
+    let info_render = [
+        ("vus", Line::from_iter(value_span(&total_vus_formatted))),
+        (
+            "max_vus",
+            Line::from_iter(value_span(&total_max_vus_formatted)),
+        ),
+        (
+            "iteration_time",
+            Line::from_iter(
+                key_value_span("avg", &average_time_formatted)
+                    .into_iter()
+                    .chain(key_value_span("max", &max_time_formatted)),
+            ),
+        ),
+        (
+            "iterations",
+            Line::from_iter(key_value_span(
+                "total",
+                &total_iterations_completed_formattted,
+            )),
+        ),
+    ];
 
-    f.render_widget(
-        Paragraph::new(format!("average_time: {}", average_time)),
-        other_areas[2],
-    );
-    f.render_widget(
-        Paragraph::new(format!("max_time: {}", max_time)),
-        other_areas[3],
-    );
-    f.render_widget(iteration_text, other_areas[4]);
+    let key_size = info_render.iter().map(|(k, _)| k.len()).max().unwrap() + 3;
+    let other_info = Layout::vertical(Constraint::from_lengths(
+        std::iter::repeat(1).take(info_render.len()),
+    ))
+    .vertical_margin(1)
+    .horizontal_margin(2)
+    .spacing(1)
+    .split(other_info);
+
+    for (i, (key, mut info)) in info_render.into_iter().enumerate() {
+        let mut padded_key = format!("{:.<width$}", key, width = key_size);
+        padded_key.push(':');
+        info.spans.insert(0, Span::raw(padded_key));
+        info.spans.insert(1, Span::raw(" "));
+
+        f.render_widget(info, other_info[i]);
+    }
+}
+
+fn padding(n: usize) -> String {
+    String::from_iter(std::iter::repeat(' ').take(n))
+}
+
+fn key_value_span<'a>(key: &'a str, value: &'a str) -> [Span<'a>; 4] {
+    [
+        Span::raw(key).bold(),
+        Span::raw("=").bold(),
+        Span::raw(value).bold().blue(),
+        Span::raw(padding(INFO_CELL_SIZE - 1 - key.len() - value.len())),
+    ]
+}
+
+fn value_span(value: &str) -> [Span<'_>; 2] {
+    [
+        Span::raw(value).bold().blue(),
+        Span::raw(padding(INFO_CELL_SIZE - value.len())),
+    ]
 }
