@@ -6,18 +6,24 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures::StreamExt;
 use ratatui::{
     backend::{Backend, CrosstermBackend},
-    layout::{Alignment, Constraint, Layout},
+    layout::{Alignment, Constraint, Layout, Margin, Rect},
     style::Stylize,
     terminal::{Frame, Terminal, Viewport},
-    text::{Line, Text},
-    widgets::{block, Block, Paragraph},
+    text::{Line, Span, Text},
+    widgets::{block, Block, Borders, Paragraph},
     TerminalOptions,
 };
 
-use crate::logical;
+const LOGO: &str = "\
+╔═══╗╔╗ ╔╗╔═══╗╔╗ ╔╗╔═══╗╔═══╗
+║╔═╗║║║ ║║║╔═╗║║║ ║║║╔══╝║╔═╗║
+║╚═╝║║║ ║║║╚══╗║╚═╝║║╚══╗║╚═╝║
+║╔╗╔╝║║ ║║╚══╗║║╔═╗║║╔══╝║╔╗╔╝
+║║║╚╗║╚═╝║║╚═╝║║║ ║║║╚══╗║║║╚╗
+╚╝╚═╝╚═══╝╚═══╝╚╝ ╚╝╚═══╝╚╝╚═╝
+";
 
 enum Event {
     Input(crossterm::event::KeyEvent),
@@ -43,7 +49,7 @@ pub struct Scenario {
 }
 
 impl Scenario {
-    pub fn new_from_scenario(scenario: &logical::Scenario<'_>) -> Self {
+    pub fn new_from_scenario(scenario: &crate::logical::Scenario<'_>) -> Self {
         let name = scenario.name.clone();
         let execs = scenario
             .execution_provider
@@ -102,7 +108,7 @@ pub fn run(
     let mut terminal = Terminal::with_options(
         backend,
         TerminalOptions {
-            viewport: Viewport::Inline(10),
+            viewport: Viewport::Inline(20),
         },
     )?;
 
@@ -204,42 +210,63 @@ fn run_app<B: Backend>(
 }
 
 fn ui(f: &mut Frame, app: &App) {
-    let area = f.size();
-    let [main_bar, other_info] = Layout::vertical([Constraint::Length(3), Constraint::Min(0)])
-        .margin(1)
-        .areas(area);
-    let [scenario_area, executors_area, iterations_area] =
-        Layout::horizontal(Constraint::from_lengths([24, 15, 10]))
-            .margin(1)
-            .areas(main_bar);
-    let other_areas = Layout::vertical(Constraint::from_lengths([1, 1, 1, 1]))
-        .horizontal_margin(1)
-        .split(other_info);
-
-    let block = Block::bordered().title(block::Title::from(" Rusher ").alignment(Alignment::Left));
-    f.render_widget(block, area);
-
     let currrent_scenario = &app.scenarios[app.current_scenario];
-    let scenario = Text::from(vec![Line::from(vec![
-        "Scenario ".to_string().bold().white(),
-        currrent_scenario.name.to_string().into(),
-    ])]);
-    let executors = Text::from(
-        currrent_scenario
-            .execs
-            .iter()
-            .map(|x| x.name.as_str())
-            .collect::<String>(),
-    );
+    let executor_names = currrent_scenario
+        .execs
+        .iter()
+        .map(|x| x.name.as_str())
+        .collect::<Vec<_>>();
     let iterations = currrent_scenario
         .execs
         .iter()
         .map(|x| x.iterations)
         .sum::<u64>();
-    let iterations = Text::from(iterations.to_string());
-    f.render_widget(scenario, scenario_area);
-    f.render_widget(executors, executors_area);
-    f.render_widget(iterations, iterations_area);
+
+    let area = f.size();
+
+    let scenario_text = Text::from(vec![Line::from(vec![
+        "Scenario - ".to_string().bold(),
+        currrent_scenario.name.to_string().into(),
+    ])]);
+    let executor_title = Line::from("Executors: ".to_string().bold());
+    let mut executors_text = Text::from(executor_title);
+    for exec in executor_names {
+        executors_text.push_line(Line::from_iter([Span::from("* ").bold(), Span::raw(exec)]))
+    }
+    let iteration_text = Text::from(iterations.to_string());
+    let average_time = currrent_scenario.execs[0].task_total_time.as_secs_f64()
+        / currrent_scenario.execs[0].iterations as f64;
+    let max_time = currrent_scenario.execs[0].task_max_time.as_secs_f64();
+
+    // No margins here. Margins are applied by children of the main area
+    let [left_area, other_info] =
+        Layout::horizontal([Constraint::Length(34), Constraint::Min(0)]).areas(area);
+
+    // Draw borders
+    f.render_widget(Block::bordered(), left_area);
+    f.render_widget(
+        Block::bordered().borders(Borders::TOP | Borders::RIGHT | Borders::BOTTOM),
+        other_info,
+    );
+
+    // Left Area
+    let [logo_area, scenario_area, executors_area] = Layout::vertical([
+        Constraint::Length(7),
+        Constraint::Length(3),
+        Constraint::Min(0),
+    ])
+    .vertical_margin(1)
+    .horizontal_margin(2)
+    .areas(left_area);
+    let scenario_area = scenario_area.inner(&Margin::new(0, 1));
+
+    f.render_widget(Paragraph::new(LOGO), logo_area);
+    f.render_widget(scenario_text, scenario_area);
+    f.render_widget(executors_text, executors_area);
+
+    let other_areas = Layout::vertical(Constraint::from_lengths([1, 1, 1, 1, 1]))
+        .margin(1)
+        .split(other_info);
 
     f.render_widget(
         Paragraph::new(format!("vus: {}", currrent_scenario.execs[0].vus)),
@@ -249,19 +276,14 @@ fn ui(f: &mut Frame, app: &App) {
         Paragraph::new(format!("max_vus: {}", currrent_scenario.execs[0].max_vus)),
         other_areas[1],
     );
+
     f.render_widget(
-        Paragraph::new(format!(
-            "average_time: {}",
-            currrent_scenario.execs[0].task_total_time.as_secs_f64()
-                / currrent_scenario.execs[0].iterations as f64
-        )),
+        Paragraph::new(format!("average_time: {}", average_time)),
         other_areas[2],
     );
     f.render_widget(
-        Paragraph::new(format!(
-            "max_time: {}",
-            currrent_scenario.execs[0].task_max_time.as_secs_f64()
-        )),
+        Paragraph::new(format!("max_time: {}", max_time)),
         other_areas[3],
     );
+    f.render_widget(iteration_text, other_areas[4]);
 }
