@@ -1,19 +1,20 @@
 use std::{
     error::Error,
-    fmt::Write,
     io,
     sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
 
+use crossterm::event::KeyCode;
 use ratatui::{
     backend::{Backend, CrosstermBackend},
-    layout::{Constraint, Layout, Rect},
-    style::Stylize,
+    layout::{Constraint, Layout, Margin, Rect},
+    style::{Color, Style, Stylize},
+    symbols,
     terminal::{Frame, Terminal, Viewport},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, LineGauge, Paragraph},
     TerminalOptions,
 };
 
@@ -33,6 +34,7 @@ const BUNNY: &str = "  //
 
 const INFO_CELL_SIZE: usize = 15;
 
+#[derive(Debug)]
 enum Event {
     Input(crossterm::event::KeyEvent),
     Tick,
@@ -43,9 +45,12 @@ enum Event {
 #[derive(Debug, Default)]
 struct ExecutorState {
     name: String,
-    vus: u64,
-    max_vus: u64,
+    users: u64,
+    max_users: u64,
     iterations: u64,
+    total_iteration: Option<u64>,
+    duration: Option<Duration>,
+    total_duration: Option<Duration>,
     task_min_time: Duration,
     task_max_time: Duration,
     task_total_time: Duration,
@@ -75,18 +80,6 @@ impl Scenario {
         self.execs.iter().map(|x| &*x.name)
     }
 
-    fn total_iterations_completed(&self) -> u64 {
-        self.execs.iter().map(|x| x.iterations).sum()
-    }
-
-    fn total_vus(&self) -> u64 {
-        self.execs.iter().map(|x| x.vus).sum()
-    }
-
-    fn total_max_vus(&self) -> u64 {
-        self.execs.iter().map(|x| x.max_vus).sum()
-    }
-
     fn update(&mut self, message: &crate::tracing::Message) {
         match message {
             crate::tracing::Message::TaskTime {
@@ -96,20 +89,30 @@ impl Scenario {
             } => {
                 if let Some(exec) = self.execs.iter_mut().find(|x| *x.name == **exec_name) {
                     exec.task_max_time = exec.task_max_time.max(*duration);
-                    exec.task_min_time = exec.task_min_time.min(*duration);
+                    if exec.task_min_time == Duration::default() {
+                        exec.task_min_time = *duration;
+                    } else {
+                        exec.task_min_time = exec.task_min_time.min(*duration);
+                    }
                     exec.task_total_time += *duration;
                 }
             }
             crate::tracing::Message::ExecutorUpdate {
                 name,
-                vus,
-                max_vus,
+                users,
+                max_users,
                 iterations,
+                total_iteration,
+                duration,
+                total_duration,
             } => {
                 if let Some(exec) = self.execs.iter_mut().find(|x| x.name == name.to_string()) {
-                    exec.vus = *vus;
-                    exec.max_vus = *max_vus;
+                    exec.users = *users;
+                    exec.max_users = *max_users;
                     exec.iterations = *iterations;
+                    exec.duration = *duration;
+                    exec.total_duration = *total_duration;
+                    exec.total_iteration = *total_iteration;
                 }
             }
             _ => {}
@@ -119,12 +122,17 @@ impl Scenario {
 
 struct App {
     current_scenario: usize,
+    current_exec: usize,
     scenarios: Vec<Scenario>,
 }
 
 impl App {
     fn current_scenario(&self) -> &Scenario {
         &self.scenarios[self.current_scenario]
+    }
+
+    fn current_exec(&self) -> &ExecutorState {
+        &self.scenarios[self.current_scenario].execs[self.current_exec]
     }
 }
 
@@ -147,6 +155,7 @@ pub fn run(
     let app = App {
         current_scenario: 0,
         scenarios,
+        current_exec: 0,
     };
 
     input_handling(tx.clone());
@@ -174,7 +183,7 @@ pub fn run(
 }
 
 fn input_handling(tx: mpsc::Sender<Event>) -> thread::JoinHandle<()> {
-    let tick_rate = Duration::from_millis(200);
+    let tick_rate = Duration::from_millis(400);
     thread::spawn(move || {
         let mut last_tick = Instant::now();
         loop {
@@ -201,73 +210,91 @@ fn run_app<B: Backend>(
     mut app: App,
     rx: mpsc::Receiver<Event>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let mut redraw = true;
-    loop {
-        if redraw {
-            terminal.draw(|f| ui(f, &app))?;
+    let mut events: Vec<Event> = Vec::new();
+    'a: loop {
+        // Catch early if the receiver is ded.
+        let event = rx.recv()?;
+        events.push(event);
+        // consume all events
+        rx.try_iter().for_each(|x| events.push(x));
+        for event in &events {
+            match event {
+                Event::Input(event) => match event.code {
+                    KeyCode::Char('q') | KeyCode::Char('c')
+                        if event.modifiers == crossterm::event::KeyModifiers::CONTROL =>
+                    {
+                        break 'a;
+                    }
+                    KeyCode::Up => {
+                        app.current_exec =
+                            (app.current_exec + 1).min(app.current_scenario().execs.len() - 1)
+                    }
+                    KeyCode::Down => app.current_exec = app.current_exec.saturating_sub(1),
+                    _ => (),
+                },
+                Event::Resize => {
+                    terminal.autoresize()?;
+                }
+                Event::Tick => {
+                    terminal.draw(|f| ui(f, &app))?;
+                }
+                Event::Message(message) => match message {
+                    crate::tracing::Message::ScenarioChanged { scenario_name } => {
+                        app.current_scenario = app
+                            .scenarios
+                            .iter()
+                            .position(|scenario| scenario.name == *scenario_name)
+                            .unwrap();
+                    }
+                    crate::tracing::Message::End => {
+                        // redraw for the last time
+                        terminal.draw(|f| ui(f, &app))?;
+                        break 'a;
+                    }
+                    _ => app.scenarios[app.current_scenario].update(message),
+                },
+            }
         }
-        redraw = true;
-
-        match rx.recv()? {
-            Event::Input(event) => {
-                if event.code == crossterm::event::KeyCode::Char('q') {
-                    break;
-                }
-                if event.code == crossterm::event::KeyCode::Char('c')
-                    && event.modifiers == crossterm::event::KeyModifiers::CONTROL
-                {
-                    break;
-                }
-            }
-            Event::Resize => {
-                terminal.autoresize()?;
-            }
-            Event::Tick => {}
-            Event::Message(message) => match message {
-                crate::tracing::Message::ScenarioChanged { scenario_name } => {
-                    app.current_scenario = app
-                        .scenarios
-                        .iter()
-                        .position(|scenario| scenario.name == scenario_name)
-                        .unwrap();
-                }
-                crate::tracing::Message::End => break,
-                _ => app.scenarios[app.current_scenario].update(&message),
-            },
-        };
+        events.clear();
     }
     Ok(())
 }
 
 fn ui(f: &mut Frame, app: &App) {
-    let currrent_scenario = app.current_scenario();
+    let current_scenario = app.current_scenario();
     let area = f.size();
 
     let scenario_text = Text::from(vec![Line::from(vec![
         "Scenario - ".to_string().bold(),
-        currrent_scenario.name.to_string().into(),
+        current_scenario.name.to_string().into(),
     ])]);
-    let executor_title = Line::from("Executors: ".to_string().bold());
-    let mut executors_text = Text::from(executor_title);
-    for exec in currrent_scenario.exec_names() {
-        executors_text.push_line(Line::from_iter([Span::from("* ").bold(), Span::raw(exec)]))
+
+    let mut executors_text = Text::from(Line::from("Executors: ".to_string().bold()));
+    for (index, exec) in current_scenario.exec_names().enumerate() {
+        executors_text.push_line(Line::from_iter([
+            if index == app.current_exec {
+                Span::from("* ").bold()
+            } else {
+                Span::from("* ")
+            },
+            Span::raw(exec),
+        ]))
     }
-    let average_time = currrent_scenario.execs[0]
+
+    let current_exec = app.current_exec();
+    let average_time = current_exec
         .task_total_time
-        .checked_div(currrent_scenario.execs[0].iterations as u32)
+        .checked_div(current_exec.iterations as u32)
         .unwrap_or_default();
-    let max_time = currrent_scenario.execs[0].task_max_time;
+    let max_time = current_exec.task_max_time;
+    let min_time = current_exec.task_min_time;
 
     // No margins here. Margins are applied by children of the main area
     let [left_area, other_info] =
         Layout::horizontal([Constraint::Length(34), Constraint::Min(0)]).areas(area);
 
     // Draw borders
-    f.render_widget(Block::bordered(), left_area);
-    f.render_widget(
-        Block::bordered().borders(Borders::TOP | Borders::RIGHT | Borders::BOTTOM),
-        other_info,
-    );
+    f.render_widget(Block::bordered().borders(Borders::RIGHT), left_area);
 
     // Left Area
     let [logo_area, scenario_area, executors_area] = Layout::vertical([
@@ -299,25 +326,26 @@ fn ui(f: &mut Frame, app: &App) {
     f.render_widget(scenario_text, scenario_area);
     f.render_widget(executors_text, executors_area);
 
-    let total_vus_formatted = currrent_scenario.total_vus().to_string();
-    let total_max_vus_formatted = currrent_scenario.total_max_vus().to_string();
+    let total_users_formatted = current_exec.users.to_string();
+    let total_max_users_formatted = current_exec.max_users.to_string();
     let average_time_formatted = format!("{:?}", average_time);
     let max_time_formatted = format!("{:?}", max_time);
-    let total_iterations_completed_formattted =
-        currrent_scenario.total_iterations_completed().to_string();
+    let min_time_formatted = format!("{:?}", min_time);
+    let total_iterations_completed_formattted = current_exec.iterations.to_string();
 
     let info_render = [
-        ("vus", Line::from_iter(value_span(&total_vus_formatted))),
+        ("users", Line::from_iter(value_span(&total_users_formatted))),
         (
-            "max_vus",
-            Line::from_iter(value_span(&total_max_vus_formatted)),
+            "max_users",
+            Line::from_iter(value_span(&total_max_users_formatted)),
         ),
         (
             "iteration_time",
             Line::from_iter(
                 key_value_span("avg", &average_time_formatted)
                     .into_iter()
-                    .chain(key_value_span("max", &max_time_formatted)),
+                    .chain(key_value_span("max", &max_time_formatted))
+                    .chain(key_value_span("min", &min_time_formatted)),
             ),
         ),
         (
@@ -330,13 +358,42 @@ fn ui(f: &mut Frame, app: &App) {
     ];
 
     let key_size = info_render.iter().map(|(k, _)| k.len()).max().unwrap() + 3;
+    let [mut progress_bar_area, other_info_area] =
+        Layout::vertical([Constraint::Length(3), Constraint::Min(0)])
+            .margin(1)
+            .horizontal_margin(2)
+            .areas(other_info);
+
+    progress_bar_area = progress_bar_area.inner(&Margin::new(2, 0));
+    progress_bar_area.width = progress_bar_area.width.min(60);
+
+    let progress = if let Some((total_duration, duration)) =
+        current_exec.total_duration.zip(current_exec.duration)
+    {
+        LineGauge::default()
+            .label(format!("{duration:?}/{total_duration:?}"))
+            .ratio(duration.as_secs_f64() / total_duration.as_secs_f64())
+    } else if let Some(total_iteration) = current_exec.total_iteration {
+        let iteration = current_exec.iterations;
+        LineGauge::default()
+            .label(format!("{iteration}/{total_iteration}"))
+            .ratio(iteration as f64 / total_iteration as f64)
+    } else {
+        LineGauge::default().label("?/???")
+    }
+    .gauge_style(Style::default().fg(Color::Green))
+    .style(Style::default().fg(Color::Blue))
+    .line_set(symbols::line::THICK);
+
+    f.render_widget(progress, progress_bar_area);
+
     let other_info = Layout::vertical(Constraint::from_lengths(
         std::iter::repeat(1).take(info_render.len()),
     ))
     .vertical_margin(1)
     .horizontal_margin(2)
     .spacing(1)
-    .split(other_info);
+    .split(other_info_area);
 
     for (i, (key, mut info)) in info_render.into_iter().enumerate() {
         let mut padded_key = format!("{:.<width$}", key, width = key_size);
@@ -357,7 +414,11 @@ fn key_value_span<'a>(key: &'a str, value: &'a str) -> [Span<'a>; 4] {
         Span::raw(key).bold(),
         Span::raw("=").bold(),
         Span::raw(value).bold().blue(),
-        Span::raw(padding(INFO_CELL_SIZE - 1 - key.len() - value.len())),
+        Span::raw(padding(
+            INFO_CELL_SIZE
+                .saturating_sub(1 + key.len() + value.len())
+                .max(1),
+        )),
     ]
 }
 

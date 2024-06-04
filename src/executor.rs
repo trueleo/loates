@@ -162,7 +162,7 @@ where
             let spawner = async_scoped::spawner::use_tokio::Tokio;
             let mut scope = unsafe { async_scoped::TokioScope::create(spawner) };
             let span = tracing::span!(target: "rusher", tracing::Level::INFO, "task");
-            event!(name: "vus", target: "rusher", Level::INFO, vus = 1u64, vus_max = 1u64);
+            event!(name: "users", target: "rusher", Level::INFO, users = 1u64, users_max = 1u64);
             scope.spawn_cancellable(
                 async move {
                     let _ = tx.unbounded_send(task.await);
@@ -195,22 +195,41 @@ where
     fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>) {
         let (tx, rx) = crate::channel();
         let end_time = Instant::now() + self.duration;
+        let users_len = self.users.len();
+        let duration = self.duration.as_secs();
+
         let tasks = self.users.iter_mut().map(move |user| {
             let tx = tx.clone();
             async move {
                 while std::time::Instant::now() < end_time {
-                    let _ = tx.unbounded_send(user.call().await);
+                    let span = tracing::Span::current();
+                    event!(name: "iterations", target: "rusher", Level::INFO, iterations = 1u64);
+                    let _ = tx.unbounded_send(user.call().instrument(span).await);
                 }
             }
         });
 
+        let timer = async move {
+            let start_time = Instant::now();
+            while std::time::Instant::now() < end_time {
+                let duration_since = Instant::now().duration_since(start_time).as_secs();
+                event!(name: "duration", target: "rusher", Level::INFO, duration = duration_since);
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+            event!(name: "duration", target: "rusher", Level::INFO, duration = duration);
+        };
+
         let task = async move {
             let spawner = async_scoped::spawner::use_tokio::Tokio;
+            event!(name: "users", target: "rusher", Level::INFO, users = users_len, users_max = users_len);
+            event!(name: "duration", target: "rusher", Level::INFO, total_duration = duration);
             let mut scope = unsafe { async_scoped::TokioScope::create(spawner) };
             for task in tasks {
-                let span = tracing::span!(tracing::Level::INFO, "task");
+                let span = tracing::span!(target: "rusher", tracing::Level::INFO, "task");
                 scope.spawn_cancellable(task.instrument(span), || ());
             }
+            let span = tracing::Span::current();
+            scope.spawn_cancellable(timer.instrument(span), || ());
             let _ = scope.collect().await;
         };
 

@@ -73,7 +73,6 @@ impl<'a> Runner<'a> {
             }
             Scope::collect(&mut scope).await;
         }
-
         event!(name: "runner_exit", target: "rusher", tracing::Level::INFO, "Exit test");
         Ok(())
     }

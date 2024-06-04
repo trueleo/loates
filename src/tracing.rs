@@ -56,9 +56,12 @@ struct TaskData {
 #[derive(Debug)]
 struct ExecutionData {
     name: Arc<str>,
-    vus: u64,
-    max_vus: u64,
+    users: u64,
+    max_users: u64,
     iterations: u64,
+    total_iteration: Option<u64>,
+    duration: Option<Duration>,
+    total_duration: Option<Duration>,
 }
 
 impl tracing::field::Visit for ExecutionData {
@@ -72,9 +75,12 @@ impl tracing::field::Visit for ExecutionData {
 
     fn record_u64(&mut self, field: &Field, value: u64) {
         match field.name() {
-            "vus" => self.vus += value,
-            "vus_max" => self.max_vus += value,
+            "users" => self.users = value,
+            "users_max" => self.max_users = value,
             "iterations" => self.iterations += value,
+            "duration" => self.duration = Some(Duration::from_secs(value)),
+            "total_duration" => self.total_duration = Some(Duration::from_secs(value)),
+            "total_iteration" => self.total_iteration = Some(value),
             _ => (),
         }
     }
@@ -104,9 +110,12 @@ pub enum Message {
     },
     ExecutorUpdate {
         name: Arc<str>,
-        vus: u64,
-        max_vus: u64,
+        users: u64,
+        max_users: u64,
         iterations: u64,
+        total_iteration: Option<u64>,
+        duration: Option<Duration>,
+        total_duration: Option<Duration>,
     },
     ScenarioChanged {
         scenario_name: String,
@@ -172,9 +181,12 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
             "exec" => {
                 let mut visitor = ExecutionData {
                     name: "".to_string().into(),
-                    vus: 0,
-                    max_vus: 0,
+                    users: 0,
+                    max_users: 0,
                     iterations: 0,
+                    total_iteration: None,
+                    duration: None,
+                    total_duration: None,
                 };
                 attr.values().record(&mut visitor);
                 let mut extentions = span.extensions_mut();
@@ -199,9 +211,12 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
         if let ControlFlow::Continue(exec_data) = handle_crate_execution_event(event, &ctx) {
             let _ = self.stats_sender.unbounded_send(Message::ExecutorUpdate {
                 name: exec_data.name,
-                vus: exec_data.vus,
-                max_vus: exec_data.max_vus,
+                users: exec_data.users,
+                max_users: exec_data.max_users,
                 iterations: exec_data.iterations,
+                total_iteration: exec_data.total_iteration,
+                duration: exec_data.duration,
+                total_duration: exec_data.total_duration,
             });
             return;
         }
@@ -279,8 +294,11 @@ fn handle_crate_execution_event<S: Subscriber + for<'a> LookupSpan<'a>>(
     event.record(exec_data);
     ControlFlow::Continue(ExecutionData {
         name: Arc::clone(&exec_data.name),
-        vus: exec_data.vus,
-        max_vus: exec_data.max_vus,
+        users: exec_data.users,
+        max_users: exec_data.max_users,
         iterations: exec_data.iterations,
+        total_iteration: exec_data.total_iteration,
+        duration: exec_data.duration,
+        total_duration: exec_data.total_duration,
     })
 }

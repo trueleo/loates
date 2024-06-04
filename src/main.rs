@@ -1,7 +1,7 @@
 use std::any::TypeId;
 use std::thread;
+use std::time::Duration;
 
-use futures::StreamExt;
 use http::StatusCode;
 use rusher::data::RuntimeDataStore;
 use rusher::logical::{ExecutionPlan, Executor, Scenario};
@@ -18,11 +18,7 @@ struct MyUser;
 #[async_trait::async_trait]
 impl User for MyUser {
     async fn call(&mut self) -> UserResult {
-        event!(name: "plank", target: "load_test", Level::INFO, attar = 1);
-        tokio::task::yield_now().await;
-        event!(name: "plank", target: "load_test", Level::INFO, attar = 2);
-        tokio::task::yield_now().await;
-        event!(name: "plank", target: "load_test", Level::INFO, attar = 3);
+        tokio::time::sleep(Duration::from_secs(1)).await;
         Ok(Report::new(StatusCode::OK))
     }
 }
@@ -41,7 +37,10 @@ async fn main() {
     let execution = ExecutionPlan::builder()
         .with_user_builder(&user_builder)
         .with_data(datastore)
-        .with_executor(Executor::Once);
+        .with_executor(Executor::Constant {
+            users: 2,
+            duration: Duration::from_secs(4),
+        });
     let scenario = Scenario::new("scene1".to_string(), execution);
     let cli_scenario = [&scenario]
         .iter()
