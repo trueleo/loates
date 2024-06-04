@@ -146,7 +146,7 @@ pub fn run(
     let mut terminal = Terminal::with_options(
         backend,
         TerminalOptions {
-            viewport: Viewport::Inline(20),
+            viewport: Viewport::Inline(17),
         },
     )?;
 
@@ -411,7 +411,7 @@ fn key_value_span<'a>(key: &'a str, value: &'a str) -> [Span<'a>; 4] {
     [
         Span::raw(key).bold(),
         Span::raw("=").bold(),
-        Span::raw(value).bold().blue(),
+        Span::raw(value).bold().light_blue(),
         Span::raw(padding(
             INFO_CELL_SIZE
                 .saturating_sub(1 + key.len() + value.len())
@@ -422,7 +422,7 @@ fn key_value_span<'a>(key: &'a str, value: &'a str) -> [Span<'a>; 4] {
 
 fn value_span(value: &str) -> [Span<'_>; 2] {
     [
-        Span::raw(value).bold().blue(),
+        Span::raw(value).bold().light_blue(),
         Span::raw(padding(INFO_CELL_SIZE.saturating_sub(value.len()).max(1))),
     ]
 }
