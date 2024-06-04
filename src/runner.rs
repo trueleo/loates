@@ -1,10 +1,14 @@
+use std::time::{Duration, Instant};
+
 use crate::data::DatastoreModifier;
 use crate::{data::RuntimeDataStore, UserResult};
+use crate::{CRATE_NAME, SPAN_EXEC, SPAN_SCENARIO};
 
 use crate::{error::Error, logical};
 
 use async_scoped::{self, Scope};
 use futures::StreamExt as _;
+use tokio::sync::oneshot;
 use tracing::{event, Instrument, Level};
 
 /// The Runner struct is the top level struct for managing and executing series of logical scenarios asynchronously.
@@ -56,24 +60,35 @@ impl<'a> Runner<'a> {
         }
 
         for (scenario_name, scenario) in runtime_scenarios.iter_mut() {
-            let span = tracing::span!(target: "rusher", tracing::Level::INFO, "scenario", name = scenario_name);
+            let span = tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_SCENARIO, name = scenario_name);
             let _entered = span.enter();
             let mut scope =
                 unsafe { async_scoped::Scope::create(async_scoped::spawner::use_tokio::Tokio) };
             for (exec_name, exec) in scenario.iter_mut() {
-                let span = tracing::span!(target: "rusher", parent: &span, tracing::Level::INFO, "exec", name = exec_name);
+                let (sync_tx, sync_rx) = tokio::sync::oneshot::channel::<()>();
                 let (task, mut res) = exec.execute();
+
+                let span = tracing::span!(target: CRATE_NAME, parent: &span, tracing::Level::INFO, SPAN_EXEC, name = exec_name);
                 let tx = self.tx.clone();
-                scope.spawn_cancellable(task.instrument(span), || ());
+                let span_ = span.clone();
+                scope.spawn_cancellable(
+                    async move {
+                        task.await;
+                        let _ = sync_tx.send(());
+                    }
+                    .instrument(span_),
+                    || (),
+                );
                 scope.spawn(async move {
                     while let Some(value) = res.next().await {
                         let _ = tx.unbounded_send(value);
                     }
-                })
+                });
+                scope.spawn(unbounded_timer(sync_rx).instrument(span));
             }
             Scope::collect(&mut scope).await;
         }
-        event!(name: "runner_exit", target: "rusher", tracing::Level::INFO, "Exit test");
+        event!(name: "runner_exit", target: CRATE_NAME, tracing::Level::INFO, "Exit test");
         Ok(())
     }
 
@@ -109,3 +124,23 @@ impl ExecutionRuntimeCtx {
 }
 
 pub struct Config {}
+
+// async timer that ticks and sends a duration event.
+// This timer can be stopped using a oneshot channel.
+async fn unbounded_timer(mut stop: oneshot::Receiver<()>) {
+    let start_time = Instant::now();
+    let timer = || async {
+        let duration_since = Instant::now().duration_since(start_time).as_secs();
+        event!(target: CRATE_NAME, Level::INFO, duration = duration_since);
+        tokio::time::sleep(Duration::from_secs(1)).await
+    };
+    loop {
+        let timer = timer();
+        tokio::select! {
+            _ = (&mut stop) => {
+                break;
+            }
+            _ = (timer) => {}
+        }
+    }
+}

@@ -5,18 +5,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures::{stream, Future};
-use tokio::{
-    select,
-    sync::oneshot::{self, error::TryRecvError},
-};
+use futures::Future;
 use tracing::{event, Instrument, Level};
 
 use crate::{
     data::{Extractor, RuntimeDataStore},
     logical,
     user::AsyncUserBuilder,
-    User, UserResult,
+    User, UserResult, CRATE_NAME, SPAN_TASK,
 };
 
 type ExecutorTask<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
@@ -34,26 +30,6 @@ pub(crate) enum DataExecutor<'a, U, Ub, Args> {
     // ConstantArrivalRate is RampingArrivalRate with 1 stage
     ConstantArrivalRate(RampingArrivalRate<'a, U, Ub, Args>),
     RampingArrivalRate(RampingArrivalRate<'a, U, Ub, Args>),
-}
-
-async fn build_inital_users<'a, U, Ub, Args>(
-    runtime: &'a RuntimeDataStore,
-    user_builder: &'a Ub,
-    count: usize,
-) -> Vec<U>
-where
-    Ub: AsyncUserBuilder<Args, U>,
-    Args: Extractor<'a> + Send,
-{
-    let mut res = vec![];
-    for _ in 0..count {
-        let user = user_builder
-            .build(Args::from_runtime(runtime).unwrap())
-            .await
-            .unwrap();
-        res.push(user)
-    }
-    res
 }
 
 impl<'a, U, Ub, Args> DataExecutor<'a, U, Ub, Args>
@@ -145,35 +121,6 @@ where
     }
 }
 
-async fn bounded_timer(total_duration: Duration) {
-    let start_time = Instant::now();
-    let end_time = start_time + total_duration;
-    while Instant::now() < end_time {
-        let duration_since = Instant::now().duration_since(start_time).as_secs();
-        event!(name: "duration", target: "rusher", Level::INFO, duration = duration_since);
-        tokio::time::sleep(Duration::from_secs(1)).await;
-    }
-    let duration = total_duration.as_secs();
-    event!(name: "duration", target: "rusher", Level::INFO, duration = duration);
-}
-
-async fn unbounded_timer(mut stop: oneshot::Receiver<()>) {
-    let start_time = Instant::now();
-    let timer = || async {
-        let duration_since = Instant::now().duration_since(start_time).as_secs();
-        event!(name: "duration", target: "rusher", Level::INFO, duration = duration_since);
-        tokio::time::sleep(Duration::from_secs(1))
-    };
-    loop {
-        select! {
-            _ = (&mut stop) => {
-                break;
-            }
-            _ = timer() => {}
-        }
-    }
-}
-
 pub(crate) struct Once<U> {
     user: U,
 }
@@ -191,23 +138,20 @@ where
     fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>) {
         let (tx, rx) = crate::channel();
         let task = self.user.call();
-        let task = async move {
+        let exec = async move {
             let spawner = async_scoped::spawner::use_tokio::Tokio;
             let mut scope = unsafe { async_scoped::TokioScope::create(spawner) };
-            event!(name: "users", target: "rusher", Level::INFO, users = 1u64, users_max = 1u64);
-            let (sync_tx, sync_rx) = oneshot::channel::<()>();
+            event!(target: CRATE_NAME, Level::INFO, users = 1u64, users_max = 1u64);
             scope.spawn_cancellable(
                 async move {
                     let _ = tx.unbounded_send(task.await);
-                    let _ = sync_tx.send(());
                 }
-                .instrument(tracing::span!(target: "rusher", tracing::Level::INFO, "task")),
+                .instrument(tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_TASK)),
                 || (),
             );
-            scope.spawn_cancellable(unbounded_timer(sync_rx).in_current_span(), || ());
             let _ = scope.collect().await;
         };
-        (Box::pin(task), rx)
+        (Box::pin(exec), rx)
     }
 }
 
@@ -240,7 +184,9 @@ where
                 while std::time::Instant::now() < end_time {
                     let res = user
                         .call()
-                        .instrument(tracing::span!(target: "rusher", tracing::Level::INFO, "task"))
+                        .instrument(
+                            tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_TASK),
+                        )
                         .await;
                     let _ = tx.unbounded_send(res);
                 }
@@ -248,14 +194,13 @@ where
         });
 
         let task = async move {
+            event!(target: CRATE_NAME, Level::INFO, users = users_len, users_max = users_len);
+            event!(target: CRATE_NAME, Level::INFO, total_duration = total_duration_as_secs);
             let spawner = async_scoped::spawner::use_tokio::Tokio;
-            event!(name: "users", target: "rusher", Level::INFO, users = users_len, users_max = users_len);
-            event!(name: "duration", target: "rusher", Level::INFO, total_duration = total_duration_as_secs);
             let mut scope = unsafe { async_scoped::TokioScope::create(spawner) };
             for task in tasks {
                 scope.spawn_cancellable(task.in_current_span(), || ());
             }
-            scope.spawn_cancellable(bounded_timer(total_duration).in_current_span(), || ());
             let _ = scope.collect().await;
         };
 
@@ -285,11 +230,15 @@ where
 {
     fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>) {
         let (tx, rx) = crate::channel();
+        let users_len = self.users.len();
         let iterations = self.iterations;
+        let total_duration_as_secs = self.duration.as_secs();
 
         let end_time = Instant::now() + self.duration;
 
         let task = async move {
+            event!(target: CRATE_NAME, Level::INFO, users = users_len, users_max = users_len);
+            event!(target: CRATE_NAME, Level::INFO, total_duration = total_duration_as_secs);
             let iterations_completed = AtomicUsize::new(iterations);
             let tasks = self.users.iter_mut().map(|user| {
                 let tx = tx.clone();
@@ -301,7 +250,9 @@ where
                         if current_iteration >= iterations {
                             break;
                         }
-                        let _ = tx.unbounded_send(user.call().await);
+                        let _ = tx.unbounded_send(user.call().instrument(
+                            tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_TASK),
+                        ).await);
                     }
                 }
             });
@@ -309,8 +260,7 @@ where
             let spawner = async_scoped::spawner::use_tokio::Tokio;
             let mut scope = unsafe { async_scoped::TokioScope::create(spawner) };
             for task in tasks {
-                let span = tracing::span!(tracing::Level::INFO, "task");
-                scope.spawn_cancellable(task.instrument(span), || ());
+                scope.spawn_cancellable(task.in_current_span(), || ());
             }
             let _ = scope.collect().await;
         };
@@ -337,6 +287,7 @@ where
     fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>) {
         let (tx, rx) = crate::channel();
         let Self { users, iterations } = self;
+        let users_len = users.len();
         let iterations = *iterations;
         let tasks = users.iter_mut().map(move |user| {
             let tx = tx.clone();
@@ -348,11 +299,16 @@ where
         });
 
         let task = async move {
+            event!(target: CRATE_NAME, Level::INFO, users = users_len, users_max = users_len);
             let spawner = async_scoped::spawner::use_tokio::Tokio;
             let mut scope = unsafe { async_scoped::TokioScope::create(spawner) };
             for task in tasks {
-                let span = tracing::span!(tracing::Level::INFO, "task");
-                scope.spawn_cancellable(task.instrument(span), || ());
+                scope.spawn_cancellable(
+                    task.instrument(
+                        tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_TASK),
+                    ),
+                    || (),
+                );
             }
             let _ = scope.collect().await;
         };
@@ -435,7 +391,7 @@ where
                 let spawner = async_scoped::spawner::use_tokio::Tokio;
                 let mut scope = unsafe { async_scoped::TokioScope::create(spawner) };
                 tasks.into_iter().for_each(|task| {
-                    let span = tracing::span!(tracing::Level::INFO, "task");
+                    let span = tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_TASK);
                     scope.spawn_cancellable(task.instrument(span), || ());
                 });
                 let _ = scope.collect().await;
@@ -521,7 +477,8 @@ where
                         let task = async move {
                             let _ = tx.unbounded_send(user.call().await);
                         };
-                        let span = tracing::span!(tracing::Level::INFO, "task");
+                        let span =
+                            tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_TASK);
                         scope.spawn_cancellable(task.instrument(span), || ());
                         current_rate += 1;
                     }
@@ -549,4 +506,24 @@ where
 
         (Box::pin(task), rx)
     }
+}
+
+async fn build_inital_users<'a, U, Ub, Args>(
+    runtime: &'a RuntimeDataStore,
+    user_builder: &'a Ub,
+    count: usize,
+) -> Vec<U>
+where
+    Ub: AsyncUserBuilder<Args, U>,
+    Args: Extractor<'a> + Send,
+{
+    let mut res = vec![];
+    for _ in 0..count {
+        let user = user_builder
+            .build(Args::from_runtime(runtime).unwrap())
+            .await
+            .unwrap();
+        res.push(user)
+    }
+    res
 }

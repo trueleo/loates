@@ -8,7 +8,6 @@ use rusher::logical::{ExecutionPlan, Executor, Scenario};
 use rusher::report::Report;
 use rusher::runner::{Config, Runner};
 use rusher::{User, UserResult};
-use tracing::{event, Level};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Registry;
 
@@ -18,7 +17,7 @@ struct MyUser;
 #[async_trait::async_trait]
 impl User for MyUser {
     async fn call(&mut self) -> UserResult {
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        tokio::time::sleep(Duration::from_millis(1000)).await;
         Ok(Report::new(StatusCode::OK))
     }
 }
@@ -32,6 +31,12 @@ async fn main() {
     let (tracer, rx_tracer) = rusher::tracing::TraceHttp::new();
     let subscriber = Registry::default().with(tracer);
     let _ = tracing::subscriber::set_global_default(subscriber);
+
+    // use tracing_subscriber::fmt::format::FmtSpan;
+    // tracing_subscriber::fmt()
+    //     .pretty()
+    //     .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+    //     .init();
 
     let user_builder = || MyUser;
     let execution = ExecutionPlan::builder()

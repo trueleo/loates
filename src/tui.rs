@@ -9,12 +9,11 @@ use std::{
 use crossterm::event::KeyCode;
 use ratatui::{
     backend::{Backend, CrosstermBackend},
-    layout::{Constraint, Layout, Margin, Rect},
+    layout::{Constraint, Layout, Rect},
     style::{Color, Style, Stylize},
-    symbols,
     terminal::{Frame, Terminal, Viewport},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, LineGauge, Paragraph},
+    widgets::{Block, Borders, Gauge, Paragraph},
     TerminalOptions,
 };
 
@@ -32,7 +31,7 @@ const BUNNY: &str = "  //
  /rr
 *\\))_";
 
-const INFO_CELL_SIZE: usize = 15;
+const INFO_CELL_SIZE: usize = 13;
 
 #[derive(Debug)]
 enum Event {
@@ -49,7 +48,7 @@ struct ExecutorState {
     max_users: u64,
     iterations: u64,
     total_iteration: Option<u64>,
-    duration: Option<Duration>,
+    duration: Duration,
     total_duration: Option<Duration>,
     task_min_time: Duration,
     task_max_time: Duration,
@@ -84,24 +83,26 @@ impl Scenario {
         match message {
             crate::tracing::Message::TaskTime {
                 exec_name,
-                duration,
+                start_time,
+                end_time,
                 ..
             } => {
                 if let Some(exec) = self.execs.iter_mut().find(|x| *x.name == **exec_name) {
-                    exec.task_max_time = exec.task_max_time.max(*duration);
-                    if exec.task_min_time == Duration::default() {
-                        exec.task_min_time = *duration;
+                    let duration = end_time.saturating_duration_since(*start_time);
+                    exec.iterations += 1;
+                    exec.task_max_time = exec.task_max_time.max(duration);
+                    if exec.task_min_time == Duration::ZERO {
+                        exec.task_min_time = duration;
                     } else {
-                        exec.task_min_time = exec.task_min_time.min(*duration);
+                        exec.task_min_time = exec.task_min_time.min(duration);
                     }
-                    exec.task_total_time += *duration;
+                    exec.task_total_time += duration;
                 }
             }
             crate::tracing::Message::ExecutorUpdate {
                 name,
                 users,
                 max_users,
-                iterations,
                 total_iteration,
                 duration,
                 total_duration,
@@ -109,7 +110,6 @@ impl Scenario {
                 if let Some(exec) = self.execs.iter_mut().find(|x| x.name == name.to_string()) {
                     exec.users = *users;
                     exec.max_users = *max_users;
-                    exec.iterations = *iterations;
                     exec.duration = *duration;
                     exec.total_duration = *total_duration;
                     exec.total_iteration = *total_iteration;
@@ -286,11 +286,12 @@ fn ui(f: &mut Frame, app: &App) {
         .task_total_time
         .checked_div(current_exec.iterations as u32)
         .unwrap_or_default();
+    let iteration_per_sec = current_exec.iterations as f64 / current_exec.duration.as_secs_f64();
     let max_time = current_exec.task_max_time;
     let min_time = current_exec.task_min_time;
 
     // No margins here. Margins are applied by children of the main area
-    let [left_area, other_info] =
+    let [left_area, other_info_area] =
         Layout::horizontal([Constraint::Length(34), Constraint::Min(0)]).areas(area);
 
     // Draw borders
@@ -328,12 +329,13 @@ fn ui(f: &mut Frame, app: &App) {
 
     let total_users_formatted = current_exec.users.to_string();
     let total_max_users_formatted = current_exec.max_users.to_string();
-    let average_time_formatted = format!("{:?}", average_time);
-    let max_time_formatted = format!("{:?}", max_time);
-    let min_time_formatted = format!("{:?}", min_time);
-    let total_iterations_completed_formattted = current_exec.iterations.to_string();
+    let average_time_formatted = format!("{:.2?}", average_time);
+    let max_time_formatted = format!("{:.2?}", max_time);
+    let min_time_formatted = format!("{:.2?}", min_time);
+    let total_iterations_completed_formatted = current_exec.iterations.to_string();
+    let iteration_per_sec_formatted = format!("{:.2} iter/sec", iteration_per_sec);
 
-    let info_render = [
+    let info_render = vec![
         ("users", Line::from_iter(value_span(&total_users_formatted))),
         (
             "max_users",
@@ -350,48 +352,44 @@ fn ui(f: &mut Frame, app: &App) {
         ),
         (
             "iterations",
-            Line::from_iter(key_value_span(
-                "total",
-                &total_iterations_completed_formattted,
-            )),
+            Line::from_iter(
+                key_value_span("total", &total_iterations_completed_formatted)
+                    .into_iter()
+                    .chain(value_span(&iteration_per_sec_formatted)),
+            ),
         ),
     ];
 
     let key_size = info_render.iter().map(|(k, _)| k.len()).max().unwrap() + 3;
     let [mut progress_bar_area, other_info_area] =
-        Layout::vertical([Constraint::Length(3), Constraint::Min(0)])
-            .margin(1)
+        Layout::vertical([Constraint::Length(1), Constraint::Min(0)])
+            .margin(2)
+            .spacing(1)
             .horizontal_margin(2)
-            .areas(other_info);
+            .areas(other_info_area);
 
-    progress_bar_area = progress_bar_area.inner(&Margin::new(2, 0));
     progress_bar_area.width = progress_bar_area.width.min(60);
 
-    let progress = if let Some((total_duration, duration)) =
-        current_exec.total_duration.zip(current_exec.duration)
-    {
-        LineGauge::default()
+    let progress = if let Some(total_duration) = current_exec.total_duration {
+        let duration = &current_exec.duration;
+        Gauge::default()
             .label(format!("{duration:?}/{total_duration:?}"))
             .ratio(duration.as_secs_f64() / total_duration.as_secs_f64())
     } else if let Some(total_iteration) = current_exec.total_iteration {
         let iteration = current_exec.iterations;
-        LineGauge::default()
+        Gauge::default()
             .label(format!("{iteration}/{total_iteration}"))
             .ratio(iteration as f64 / total_iteration as f64)
     } else {
-        LineGauge::default().label("?/???")
+        Gauge::default().label("?/???")
     }
-    .gauge_style(Style::default().fg(Color::Green))
-    .style(Style::default().fg(Color::Blue))
-    .line_set(symbols::line::THICK);
+    .gauge_style(Style::default().fg(Color::Green).bg(Color::Gray));
 
     f.render_widget(progress, progress_bar_area);
 
     let other_info = Layout::vertical(Constraint::from_lengths(
         std::iter::repeat(1).take(info_render.len()),
     ))
-    .vertical_margin(1)
-    .horizontal_margin(2)
     .spacing(1)
     .split(other_info_area);
 
@@ -425,6 +423,6 @@ fn key_value_span<'a>(key: &'a str, value: &'a str) -> [Span<'a>; 4] {
 fn value_span(value: &str) -> [Span<'_>; 2] {
     [
         Span::raw(value).bold().blue(),
-        Span::raw(padding(INFO_CELL_SIZE - value.len())),
+        Span::raw(padding(INFO_CELL_SIZE.saturating_sub(value.len()).max(1))),
     ]
 }

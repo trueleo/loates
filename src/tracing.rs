@@ -1,5 +1,4 @@
 use std::{
-    fmt::Write as _,
     ops::ControlFlow,
     sync::Arc,
     time::{Duration, Instant},
@@ -11,6 +10,8 @@ use tracing::{
 };
 
 use tracing_subscriber::{registry::LookupSpan, Layer};
+
+use crate::{CRATE_NAME, SPAN_EXEC, SPAN_SCENARIO, SPAN_TASK};
 
 /// Represents scalar values that are allowed to be in a user event's attribute set.
 #[derive(Debug)]
@@ -58,9 +59,8 @@ struct ExecutionData {
     name: Arc<str>,
     users: u64,
     max_users: u64,
-    iterations: u64,
     total_iteration: Option<u64>,
-    duration: Option<Duration>,
+    duration: Duration,
     total_duration: Option<Duration>,
 }
 
@@ -77,8 +77,7 @@ impl tracing::field::Visit for ExecutionData {
         match field.name() {
             "users" => self.users = value,
             "users_max" => self.max_users = value,
-            "iterations" => self.iterations += value,
-            "duration" => self.duration = Some(Duration::from_secs(value)),
+            "duration" => self.duration = Duration::from_secs(value),
             "total_duration" => self.total_duration = Some(Duration::from_secs(value)),
             "total_iteration" => self.total_iteration = Some(value),
             _ => (),
@@ -92,9 +91,10 @@ struct ScenarioData {
 }
 
 impl tracing::field::Visit for ScenarioData {
-    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+    fn record_debug(&mut self, _: &Field, _: &dyn std::fmt::Debug) {}
+    fn record_str(&mut self, field: &Field, value: &str) {
         if field.name() == "name" {
-            write!(self.name, "{:?}", value).unwrap()
+            self.name = value.into()
         }
     }
 }
@@ -105,16 +105,16 @@ pub enum Message {
     TaskTime {
         exec_name: Arc<str>,
         scenario_name: Arc<str>,
-        duration: Duration,
+        start_time: Instant,
+        end_time: Instant,
         events: Vec<TaskEventData>,
     },
     ExecutorUpdate {
         name: Arc<str>,
         users: u64,
         max_users: u64,
-        iterations: u64,
         total_iteration: Option<u64>,
-        duration: Option<Duration>,
+        duration: Duration,
         total_duration: Option<Duration>,
     },
     ScenarioChanged {
@@ -143,7 +143,7 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
         _ctx: tracing_subscriber::layer::Context<'_, S>,
     ) -> bool {
         let target = metadata.target();
-        target == "load_test" || target == "rusher"
+        target == "load_test" || target == CRATE_NAME
     }
 
     fn on_new_span(
@@ -153,22 +153,26 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
         ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
         let Some(span) = ctx.span(id) else { return };
-        if span.metadata().target() != "rusher" {
+        if span.metadata().target() != CRATE_NAME {
             return;
         };
         match span.name() {
-            "task" => {
+            SPAN_TASK => {
                 let Some(exec_span) = span.parent() else {
                     return;
                 };
                 let extensions = &exec_span.extensions();
-                let exec_name = extensions.get::<ExecutionData>().unwrap();
+                let exec_name = extensions
+                    .get::<ExecutionData>()
+                    .expect("task parent is exec");
 
                 let Some(scenario_span) = exec_span.parent() else {
                     return;
                 };
                 let extensions = &scenario_span.extensions();
-                let scenario_name = extensions.get::<ScenarioData>().unwrap();
+                let scenario_name = extensions
+                    .get::<ScenarioData>()
+                    .expect("exec parent is scenario");
 
                 let mut extentions = span.extensions_mut();
                 extentions.insert(TaskData {
@@ -178,21 +182,20 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
                     events: Vec::default(),
                 });
             }
-            "exec" => {
+            SPAN_EXEC => {
                 let mut visitor = ExecutionData {
                     name: "".to_string().into(),
                     users: 0,
                     max_users: 0,
-                    iterations: 0,
                     total_iteration: None,
-                    duration: None,
+                    duration: Duration::ZERO,
                     total_duration: None,
                 };
                 attr.values().record(&mut visitor);
                 let mut extentions = span.extensions_mut();
                 extentions.insert(visitor);
             }
-            "scenario" => {
+            SPAN_SCENARIO => {
                 let mut visitor = ScenarioData {
                     name: "".to_string(),
                 };
@@ -205,7 +208,7 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
     }
 
     fn on_event(&self, event: &tracing::Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        if event.metadata().target() == "rusher" && event.metadata().name() == "runner_exit" {
+        if event.metadata().target() == CRATE_NAME && event.metadata().name() == "runner_exit" {
             let _ = self.stats_sender.unbounded_send(Message::End);
         }
         if let ControlFlow::Continue(exec_data) = handle_crate_execution_event(event, &ctx) {
@@ -213,7 +216,6 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
                 name: exec_data.name,
                 users: exec_data.users,
                 max_users: exec_data.max_users,
-                iterations: exec_data.iterations,
                 total_iteration: exec_data.total_iteration,
                 duration: exec_data.duration,
                 total_duration: exec_data.total_duration,
@@ -224,6 +226,7 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
     }
 
     fn on_close(&self, id: span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
+        let end_time = Instant::now();
         let Some(span) = ctx.span(&id) else { return };
         let mut extention = span.extensions_mut();
         let Some(task_data) = extention.get_mut::<TaskData>() else {
@@ -231,9 +234,10 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
         };
         let events = std::mem::take(&mut task_data.events);
         let _ = self.stats_sender.unbounded_send(Message::TaskTime {
+            start_time: task_data.instant,
             exec_name: task_data.exec.clone(),
             scenario_name: task_data.scenario.clone(),
-            duration: task_data.instant.elapsed(),
+            end_time,
             events,
         });
     }
@@ -249,7 +253,7 @@ fn handle_user_event<S: Subscriber + for<'a> LookupSpan<'a>>(
     let Some(parent) = ctx.current_span().id().and_then(|id| ctx.span(id)) else {
         return ControlFlow::Break(());
     };
-    let Some(task_parent) = parent.scope().find(|span| span.name() == "task") else {
+    let Some(task_parent) = parent.scope().find(|span| span.name() == SPAN_TASK) else {
         return ControlFlow::Break(());
     };
     let mut task_ext = task_parent.extensions_mut();
@@ -284,7 +288,7 @@ fn handle_crate_execution_event<S: Subscriber + for<'a> LookupSpan<'a>>(
     let Some(parent) = ctx.current_span().id().and_then(|id| ctx.span(id)) else {
         return ControlFlow::Break(());
     };
-    let Some(exec_span) = parent.scope().find(|span| span.name() == "exec") else {
+    let Some(exec_span) = parent.scope().find(|span| span.name() == SPAN_EXEC) else {
         return ControlFlow::Break(());
     };
     let mut exec_ext = exec_span.extensions_mut();
@@ -296,7 +300,6 @@ fn handle_crate_execution_event<S: Subscriber + for<'a> LookupSpan<'a>>(
         name: Arc::clone(&exec_data.name),
         users: exec_data.users,
         max_users: exec_data.max_users,
-        iterations: exec_data.iterations,
         total_iteration: exec_data.total_iteration,
         duration: exec_data.duration,
         total_duration: exec_data.total_duration,
