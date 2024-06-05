@@ -24,7 +24,7 @@ pub enum Value {
 /// Group of events that has occured inside of a user call grouped by event name
 #[derive(Debug)]
 pub struct TaskEventData {
-    name: Arc<str>,
+    name: &'static str,
     values: Vec<(&'static str, Value)>,
 }
 
@@ -264,12 +264,12 @@ fn handle_user_event<S: Subscriber + for<'a> LookupSpan<'a>>(
     if let Some(data) = task_data
         .events
         .iter_mut()
-        .find(|data| &*data.name == event.metadata().name())
+        .find(|data| data.name == event.metadata().name())
     {
         event.record(data);
     } else {
         let mut event_data = TaskEventData {
-            name: event.metadata().name().to_string().into(),
+            name: event.metadata().name(),
             values: vec![],
         };
         event.record(&mut event_data);

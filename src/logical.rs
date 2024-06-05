@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, time::Duration};
+use std::{borrow::Cow, marker::PhantomData, time::Duration};
 
 use crate::{
     data::{DatastoreModifier, Extractor},
@@ -44,7 +44,7 @@ pub enum Executor {
 
 #[async_trait::async_trait]
 pub trait ExecutionProvider {
-    fn name(&self) -> String;
+    fn label(&self) -> Cow<'_, str>;
     async fn execution<'a>(
         &'a self,
         ctx: &'a mut ExecutionRuntimeCtx,
@@ -52,20 +52,24 @@ pub trait ExecutionProvider {
 }
 
 pub struct Scenario<'env> {
-    pub(crate) name: String,
+    pub(crate) label: Cow<'static, str>,
     pub(crate) execution_provider: Vec<Box<dyn ExecutionProvider + 'env>>,
 }
 
 impl<'env> Scenario<'env> {
-    pub fn new<T: ExecutionProvider + 'env>(name: String, execution: T) -> Self {
+    pub fn new<T: ExecutionProvider + 'env>(
+        label: impl Into<Cow<'static, str>>,
+        execution: T,
+    ) -> Self {
         Self {
-            name,
+            label: label.into(),
             execution_provider: vec![Box::new(execution)],
         }
     }
 }
 
 pub struct ExecutionPlan<'env, U, Ub, Args> {
+    label: Option<Cow<'static, str>>,
     user_builder: &'env Ub,
     datastore_modifiers: Vec<Box<dyn DatastoreModifier>>,
     executor: Executor,
@@ -75,11 +79,13 @@ pub struct ExecutionPlan<'env, U, Ub, Args> {
 
 impl<'env, U, Ub, Args> ExecutionPlan<'env, U, Ub, Args> {
     pub fn new(
+        label: Option<Cow<'static, str>>,
         user_builder: &'env Ub,
         datastore_modifiers: Vec<Box<dyn DatastoreModifier>>,
         executor: Executor,
     ) -> Self {
         Self {
+            label,
             user_builder,
             datastore_modifiers,
             executor,
@@ -92,6 +98,7 @@ impl<'env, U, Ub, Args> ExecutionPlan<'env, U, Ub, Args> {
 impl ExecutionPlan<'static, (), (), ()> {
     pub fn builder() -> ExecutionPlan<'static, (), (), ()> {
         Self {
+            label: None,
             user_builder: &(),
             datastore_modifiers: Vec::new(),
             executor: Executor::Once,
@@ -100,11 +107,16 @@ impl ExecutionPlan<'static, (), (), ()> {
         }
     }
 
+    pub fn with_label(&mut self, label: impl Into<Cow<'static, str>>) {
+        self.label = Some(label.into());
+    }
+
     pub fn with_user_builder<'env, U, Args, Ub: AsyncUserBuilder<Args, U> + 'env>(
         self,
         user_builder: &'env Ub,
     ) -> ExecutionPlan<'env, U, Ub, Args> {
         ExecutionPlan::<'env, U, Ub, Args>::new(
+            self.label,
             user_builder,
             self.datastore_modifiers,
             self.executor,
@@ -118,6 +130,7 @@ impl<U, Ub, Args> ExecutionPlan<'_, U, Ub, Args> {
             .push(Box::new(f) as Box<dyn DatastoreModifier>);
         self
     }
+
     pub fn with_executor(mut self, executor: Executor) -> Self {
         self.executor = executor;
         self
@@ -131,17 +144,21 @@ where
     U: User,
     Args: for<'a> Extractor<'a> + Send + Sync,
 {
-    fn name(&self) -> String {
+    fn label(&self) -> Cow<'_, str> {
+        if let Some(ref label) = self.label {
+            return Cow::Borrowed(label.as_ref());
+        }
+
         match &self.executor {
-            Executor::Once => "Once".to_string(),
+            Executor::Once => Cow::Borrowed("Once"),
             Executor::Constant { users, duration } => {
-                format!("Constant {} users {:?}", users, duration)
+                format!("Constant {} users {:?}", users, duration).into()
             }
             Executor::Shared {
                 users, iterations, ..
-            } => format!("Shared {} users {}", users, iterations),
+            } => format!("Shared {} users {}", users, iterations).into(),
             Executor::PerUser { users, iterations } => {
-                format!("PerUser {} users {}", users, iterations)
+                format!("PerUser {} users {}", users, iterations).into()
             }
             Executor::ConstantArrivalRate {
                 rate,
@@ -151,10 +168,13 @@ where
             } => format!(
                 "ConstantArrivalRate {}/{:?} for {:?}",
                 rate, time_unit, duration
-            ),
-            Executor::RampingUser { stages, .. } => format!("RampingUser stages {}", stages.len()),
+            )
+            .into(),
+            Executor::RampingUser { stages, .. } => {
+                format!("RampingUser stages {}", stages.len()).into()
+            }
             Executor::RampingArrivalRate { stages, .. } => {
-                format!("RampingArrivalRate stages {}", stages.len())
+                format!("RampingArrivalRate stages {}", stages.len()).into()
             }
         }
     }

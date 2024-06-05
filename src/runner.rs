@@ -19,14 +19,11 @@ pub struct Runner<'a> {
 
 impl<'a> Runner<'a> {
     // Create new instance of Runner with a [Config](crate::config::Config) and list of [Scenario](create::logical::Scenario)
-    pub fn new(
-        config: Config,
-        scenarios: Vec<logical::Scenario<'a>>,
-    ) -> (Runner, crate::Receiver<UserResult>) {
+    pub fn new(scenarios: Vec<logical::Scenario<'a>>) -> (Runner, crate::Receiver<UserResult>) {
         let (tx, rx) = crate::channel();
         (
             Self {
-                logical: LogicalContext { config, scenarios },
+                logical: LogicalContext { scenarios },
                 tx,
             },
             rx,
@@ -54,21 +51,21 @@ impl<'a> Runner<'a> {
         for (scenario, context) in self.logical.scenarios.iter().zip(runtime_ctx_mut) {
             let mut runtime_scenario = Vec::new();
             for (exec, context) in scenario.execution_provider.iter().zip(context) {
-                runtime_scenario.push((exec.name(), exec.execution(context).await))
+                runtime_scenario.push((exec.label(), exec.execution(context).await))
             }
-            runtime_scenarios.push((scenario.name.clone(), runtime_scenario))
+            runtime_scenarios.push((scenario.label.clone(), runtime_scenario))
         }
 
-        for (scenario_name, scenario) in runtime_scenarios.iter_mut() {
-            let span = tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_SCENARIO, name = scenario_name);
+        for (scenario_index, (scenario_name, scenario)) in runtime_scenarios.iter_mut().enumerate()
+        {
+            let span = tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_SCENARIO, name = scenario_name.as_ref(), id = scenario_index);
             let _entered = span.enter();
             let mut scope =
                 unsafe { async_scoped::Scope::create(async_scoped::spawner::use_tokio::Tokio) };
-            for (exec_name, exec) in scenario.iter_mut() {
+            for (exec_index, (exec_name, exec)) in scenario.iter_mut().enumerate() {
                 let (sync_tx, sync_rx) = tokio::sync::oneshot::channel::<()>();
                 let (task, mut res) = exec.execute();
-
-                let span = tracing::span!(target: CRATE_NAME, parent: &span, tracing::Level::INFO, SPAN_EXEC, name = exec_name);
+                let span = tracing::span!(target: CRATE_NAME, parent: &span, tracing::Level::INFO, SPAN_EXEC, name = exec_name.as_ref(), id = exec_index);
                 let tx = self.tx.clone();
                 let span_ = span.clone();
                 scope.spawn_cancellable(
@@ -98,7 +95,6 @@ impl<'a> Runner<'a> {
 }
 
 pub struct LogicalContext<'a> {
-    config: Config,
     scenarios: Vec<logical::Scenario<'a>>,
 }
 

@@ -62,16 +62,15 @@ pub struct Scenario {
 
 impl Scenario {
     pub fn new_from_scenario(scenario: &crate::logical::Scenario<'_>) -> Self {
-        let name = scenario.name.clone();
+        let name = scenario.label.to_string();
         let execs = scenario
             .execution_provider
             .iter()
             .map(|exec| ExecutorState {
-                name: exec.name().to_string(),
+                name: exec.label().to_string(),
                 ..Default::default()
             })
             .collect();
-
         Self { name, execs }
     }
 
@@ -176,7 +175,7 @@ pub fn run(
     })?;
 
     let size = terminal.get_frame().size();
-    terminal.set_cursor(size.width, size.height + size.y)?;
+    terminal.set_cursor(size.width, size.height + size.y + 1)?;
     crossterm::terminal::disable_raw_mode()?;
 
     Ok(())

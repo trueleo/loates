@@ -6,7 +6,7 @@ use http::StatusCode;
 use rusher::data::RuntimeDataStore;
 use rusher::logical::{ExecutionPlan, Executor, Scenario};
 use rusher::report::Report;
-use rusher::runner::{Config, Runner};
+use rusher::runner::Runner;
 use rusher::{User, UserResult};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Registry;
@@ -52,7 +52,7 @@ async fn main() {
         .map(|scenario| rusher::tui::Scenario::new_from_scenario(scenario))
         .collect();
     let tui = thread::spawn(|| rusher::tui::run(rx_tracer, cli_scenario));
-    let (runtime, _) = Runner::new(Config {}, vec![scenario]);
+    let (runtime, _) = Runner::new(vec![scenario]);
     runtime.run().await.unwrap();
     tui.join().unwrap().unwrap();
 }
