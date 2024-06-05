@@ -66,6 +66,11 @@ impl<'env> Scenario<'env> {
             execution_provider: vec![Box::new(execution)],
         }
     }
+
+    pub fn with_executor<T: ExecutionProvider + 'env>(mut self, execution: T) -> Self {
+        self.execution_provider.push(Box::new(execution));
+        self
+    }
 }
 
 pub struct ExecutionPlan<'env, U, Ub, Args> {

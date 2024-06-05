@@ -1,6 +1,5 @@
 use std::{
     ops::ControlFlow,
-    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -18,7 +17,21 @@ use crate::{CRATE_NAME, SPAN_EXEC, SPAN_SCENARIO, SPAN_TASK};
 pub enum Value {
     String(String),
     Number(i64),
+    UnsignedNumber(u64),
     Float(f64),
+}
+
+#[derive(Debug, Default)]
+struct ErrorVisitor {
+    err: String,
+}
+
+impl Visit for ErrorVisitor {
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "err" {
+            self.err = format!("{:?}", value)
+        }
+    }
 }
 
 /// Group of events that has occured inside of a user call grouped by event name
@@ -36,27 +49,31 @@ impl Visit for TaskEventData {
 
     fn record_u64(&mut self, field: &Field, value: u64) {
         self.values
-            .push((field.name(), Value::Number(value as i64)))
+            .push((field.name(), Value::UnsignedNumber(value)))
     }
 
     fn record_i64(&mut self, field: &Field, value: i64) {
         self.values.push((field.name(), Value::Number(value)))
+    }
+
+    fn record_f64(&mut self, field: &Field, value: f64) {
+        self.values.push((field.name(), Value::Float(value)))
     }
 }
 
 /// Tracked data that is associated with a task
 #[derive(Debug)]
 struct TaskData {
+    scenario_id: usize,
+    execution_id: usize,
     instant: Instant,
-    exec: Arc<str>,
-    scenario: Arc<str>,
     events: Vec<TaskEventData>,
 }
 
 /// Tracked data associated with span of an execution.
 #[derive(Debug)]
 struct ExecutionData {
-    name: Arc<str>,
+    id: usize,
     users: u64,
     max_users: u64,
     total_iteration: Option<u64>,
@@ -67,14 +84,9 @@ struct ExecutionData {
 impl tracing::field::Visit for ExecutionData {
     fn record_debug(&mut self, _: &Field, _: &dyn std::fmt::Debug) {}
 
-    fn record_str(&mut self, field: &Field, value: &str) {
-        if field.name() == "name" {
-            self.name = value.into();
-        }
-    }
-
     fn record_u64(&mut self, field: &Field, value: u64) {
         match field.name() {
+            "id" => self.id = value as usize,
             "users" => self.users = value,
             "users_max" => self.max_users = value,
             "duration" => self.duration = Duration::from_secs(value),
@@ -87,14 +99,14 @@ impl tracing::field::Visit for ExecutionData {
 
 /// Tracked data associated with a span of a scenario .
 struct ScenarioData {
-    name: String,
+    id: usize,
 }
 
 impl tracing::field::Visit for ScenarioData {
     fn record_debug(&mut self, _: &Field, _: &dyn std::fmt::Debug) {}
-    fn record_str(&mut self, field: &Field, value: &str) {
-        if field.name() == "name" {
-            self.name = value.into()
+    fn record_u64(&mut self, field: &Field, value: u64) {
+        if field.name() == "id" {
+            self.id = value as usize
         }
     }
 }
@@ -103,22 +115,25 @@ impl tracing::field::Visit for ScenarioData {
 #[derive(Debug)]
 pub enum Message {
     TaskTime {
-        exec_name: Arc<str>,
-        scenario_name: Arc<str>,
+        execution_id: usize,
+        scenario_id: usize,
         start_time: Instant,
         end_time: Instant,
         events: Vec<TaskEventData>,
     },
     ExecutorUpdate {
-        name: Arc<str>,
+        id: usize,
         users: u64,
         max_users: u64,
         total_iteration: Option<u64>,
         duration: Duration,
         total_duration: Option<Duration>,
     },
+    TerminatedError {
+        err: String,
+    },
     ScenarioChanged {
-        scenario_name: String,
+        scenario_id: usize,
     },
     End,
 }
@@ -162,7 +177,7 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
                     return;
                 };
                 let extensions = &exec_span.extensions();
-                let exec_name = extensions
+                let execution = extensions
                     .get::<ExecutionData>()
                     .expect("task parent is exec");
 
@@ -170,21 +185,21 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
                     return;
                 };
                 let extensions = &scenario_span.extensions();
-                let scenario_name = extensions
+                let scenario = extensions
                     .get::<ScenarioData>()
                     .expect("exec parent is scenario");
 
                 let mut extentions = span.extensions_mut();
                 extentions.insert(TaskData {
                     instant: Instant::now(),
-                    exec: exec_name.name.to_string().into(),
-                    scenario: scenario_name.name.to_string().into(),
                     events: Vec::default(),
+                    scenario_id: scenario.id,
+                    execution_id: execution.id,
                 });
             }
             SPAN_EXEC => {
                 let mut visitor = ExecutionData {
-                    name: "".to_string().into(),
+                    id: usize::MAX,
                     users: 0,
                     max_users: 0,
                     total_iteration: None,
@@ -196,9 +211,7 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
                 extentions.insert(visitor);
             }
             SPAN_SCENARIO => {
-                let mut visitor = ScenarioData {
-                    name: "".to_string(),
-                };
+                let mut visitor = ScenarioData { id: usize::MAX };
                 attr.values().record(&mut visitor);
                 let mut extentions = span.extensions_mut();
                 extentions.insert(visitor);
@@ -208,12 +221,27 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
     }
 
     fn on_event(&self, event: &tracing::Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        if event.metadata().target() == CRATE_NAME && event.metadata().name() == "runner_exit" {
-            let _ = self.stats_sender.unbounded_send(Message::End);
+        if event.metadata().target() == CRATE_NAME {
+            match event.metadata().name() {
+                "runner_exit" => {
+                    let _ = self.stats_sender.unbounded_send(Message::End);
+                    return;
+                }
+                "termination_error" => {
+                    let mut err = ErrorVisitor::default();
+                    event.record(&mut err);
+                    let _ = self
+                        .stats_sender
+                        .unbounded_send(Message::TerminatedError { err: err.err });
+                    return;
+                }
+                _ => (),
+            }
         }
+
         if let ControlFlow::Continue(exec_data) = handle_crate_execution_event(event, &ctx) {
             let _ = self.stats_sender.unbounded_send(Message::ExecutorUpdate {
-                name: exec_data.name,
+                id: exec_data.id,
                 users: exec_data.users,
                 max_users: exec_data.max_users,
                 total_iteration: exec_data.total_iteration,
@@ -235,8 +263,8 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
         let events = std::mem::take(&mut task_data.events);
         let _ = self.stats_sender.unbounded_send(Message::TaskTime {
             start_time: task_data.instant,
-            exec_name: task_data.exec.clone(),
-            scenario_name: task_data.scenario.clone(),
+            execution_id: task_data.execution_id,
+            scenario_id: task_data.scenario_id,
             end_time,
             events,
         });
@@ -297,7 +325,7 @@ fn handle_crate_execution_event<S: Subscriber + for<'a> LookupSpan<'a>>(
     };
     event.record(exec_data);
     ControlFlow::Continue(ExecutionData {
-        name: Arc::clone(&exec_data.name),
+        id: exec_data.id,
         users: exec_data.users,
         max_users: exec_data.max_users,
         total_iteration: exec_data.total_iteration,

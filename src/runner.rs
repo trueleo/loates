@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use crate::data::DatastoreModifier;
-use crate::{data::RuntimeDataStore, UserResult};
+use crate::data::RuntimeDataStore;
 use crate::{CRATE_NAME, SPAN_EXEC, SPAN_SCENARIO};
 
 use crate::{error::Error, logical};
@@ -14,37 +14,19 @@ use tracing::{event, Instrument, Level};
 /// The Runner struct is the top level struct for managing and executing series of logical scenarios asynchronously.
 pub struct Runner<'a> {
     logical: LogicalContext<'a>,
-    tx: crate::Sender<UserResult>,
 }
 
 impl<'a> Runner<'a> {
     // Create new instance of Runner with a [Config](crate::config::Config) and list of [Scenario](create::logical::Scenario)
-    pub fn new(scenarios: Vec<logical::Scenario<'a>>) -> (Runner, crate::Receiver<UserResult>) {
-        let (tx, rx) = crate::channel();
-        (
-            Self {
-                logical: LogicalContext { scenarios },
-                tx,
-            },
-            rx,
-        )
+    pub fn new(scenarios: Vec<logical::Scenario<'a>>) -> Runner {
+        Self {
+            logical: LogicalContext { scenarios },
+        }
     }
 
     // Spawn the runner
     pub async fn run(&self) -> Result<(), Error> {
-        let mut runtime_ctx: Vec<Vec<ExecutionRuntimeCtx>> = self
-            .logical
-            .scenarios
-            .iter()
-            .map(|scenario| {
-                scenario
-                    .execution_provider
-                    .iter()
-                    .map(|_| ExecutionRuntimeCtx::new())
-                    .collect()
-            })
-            .collect();
-
+        let mut runtime_ctx = self.create_contexts();
         let runtime_ctx_mut = runtime_ctx.iter_mut().map(|x| x.iter_mut());
 
         let mut runtime_scenarios = Vec::new();
@@ -58,15 +40,17 @@ impl<'a> Runner<'a> {
 
         for (scenario_index, (scenario_name, scenario)) in runtime_scenarios.iter_mut().enumerate()
         {
-            let span = tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_SCENARIO, name = scenario_name.as_ref(), id = scenario_index);
+            let span = tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_SCENARIO, name = scenario_name.as_ref(), id = scenario_index as u64);
             let _entered = span.enter();
             let mut scope =
                 unsafe { async_scoped::Scope::create(async_scoped::spawner::use_tokio::Tokio) };
-            for (exec_index, (exec_name, exec)) in scenario.iter_mut().enumerate() {
+
+            let mut results = vec![];
+            for (executor_index, (executor_name, executor)) in scenario.iter_mut().enumerate() {
                 let (sync_tx, sync_rx) = tokio::sync::oneshot::channel::<()>();
-                let (task, mut res) = exec.execute();
-                let span = tracing::span!(target: CRATE_NAME, parent: &span, tracing::Level::INFO, SPAN_EXEC, name = exec_name.as_ref(), id = exec_index);
-                let tx = self.tx.clone();
+                let (task, res) = executor.execute();
+                results.push(res);
+                let span = tracing::span!(target: CRATE_NAME, parent: &span, tracing::Level::INFO, SPAN_EXEC, name = executor_name.as_ref(), id = executor_index as u64);
                 let span_ = span.clone();
                 scope.spawn_cancellable(
                     async move {
@@ -76,17 +60,43 @@ impl<'a> Runner<'a> {
                     .instrument(span_),
                     || (),
                 );
-                scope.spawn(async move {
-                    while let Some(value) = res.next().await {
-                        let _ = tx.unbounded_send(value);
-                    }
-                });
                 scope.spawn(unbounded_timer(sync_rx).instrument(span));
             }
-            Scope::collect(&mut scope).await;
+
+            let mut res = futures::stream::select_all(results);
+            let mut terminated_by_user = false;
+            while let Some(value) = res.next().await {
+                if let Err(Error::TerminationError(err)) = value {
+                    event!(name: "termination_error", target: CRATE_NAME, tracing::Level::INFO, err = err.to_string());
+                    scope.cancel();
+                    terminated_by_user = true;
+                    break;
+                }
+            }
+
+            if !terminated_by_user {
+                Scope::collect(&mut scope).await;
+            } else {
+                break;
+            }
         }
+
         event!(name: "runner_exit", target: CRATE_NAME, tracing::Level::INFO, "Exit test");
         Ok(())
+    }
+
+    fn create_contexts(&self) -> Vec<Vec<ExecutionRuntimeCtx>> {
+        self.logical
+            .scenarios
+            .iter()
+            .map(|scenario| {
+                scenario
+                    .execution_provider
+                    .iter()
+                    .map(|_| ExecutionRuntimeCtx::new())
+                    .collect()
+            })
+            .collect()
     }
 
     pub fn scenario(&self) -> &[logical::Scenario<'a>] {
