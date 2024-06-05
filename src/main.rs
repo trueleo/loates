@@ -3,7 +3,6 @@ use std::thread;
 use std::time::Duration;
 
 use rusher::data::RuntimeDataStore;
-use rusher::error::Error;
 use rusher::logical::{ExecutionPlan, Executor, Scenario};
 use rusher::runner::Runner;
 use rusher::{User, UserResult};
@@ -17,8 +16,8 @@ struct MyUser;
 impl User for MyUser {
     async fn call(&mut self) -> UserResult {
         tokio::time::sleep(Duration::from_millis(1000)).await;
-        // Err(Error::TerminationError("bruh".into()))
-        Ok(())
+        Err(rusher::error::Error::GenericError("bruh".into()))
+        // Ok(())
     }
 }
 

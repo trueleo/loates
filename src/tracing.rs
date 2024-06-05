@@ -1,4 +1,5 @@
 use std::{
+    fmt::Display,
     ops::ControlFlow,
     time::{Duration, Instant},
 };
@@ -10,7 +11,7 @@ use tracing::{
 
 use tracing_subscriber::{registry::LookupSpan, Layer};
 
-use crate::{CRATE_NAME, SPAN_EXEC, SPAN_SCENARIO, SPAN_TASK};
+use crate::{CRATE_NAME, SPAN_EXEC, SPAN_SCENARIO, SPAN_TASK, TARGET_USER_EVENT};
 
 /// Represents scalar values that are allowed to be in a user event's attribute set.
 #[derive(Debug)]
@@ -19,6 +20,17 @@ pub enum Value {
     Number(i64),
     UnsignedNumber(u64),
     Float(f64),
+}
+
+impl Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::String(x) => write!(f, "{}", x),
+            Value::Number(x) => write!(f, "{}", x),
+            Value::UnsignedNumber(x) => write!(f, "{}", x),
+            Value::Float(x) => write!(f, "{}", x),
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -37,8 +49,8 @@ impl Visit for ErrorVisitor {
 /// Group of events that has occured inside of a user call grouped by event name
 #[derive(Debug)]
 pub struct TaskEventData {
-    name: &'static str,
-    values: Vec<(&'static str, Value)>,
+    pub name: &'static str,
+    pub values: Vec<(&'static str, Value)>,
 }
 
 impl Visit for TaskEventData {
@@ -158,7 +170,7 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
         _ctx: tracing_subscriber::layer::Context<'_, S>,
     ) -> bool {
         let target = metadata.target();
-        target == "load_test" || target == CRATE_NAME
+        target == TARGET_USER_EVENT || target == CRATE_NAME
     }
 
     fn on_new_span(
@@ -275,7 +287,7 @@ fn handle_user_event<S: Subscriber + for<'a> LookupSpan<'a>>(
     event: &tracing::Event,
     ctx: &tracing_subscriber::layer::Context<S>,
 ) -> ControlFlow<()> {
-    if event.metadata().target() != "load_test" {
+    if event.metadata().target() != TARGET_USER_EVENT {
         return ControlFlow::Break(());
     }
     let Some(parent) = ctx.current_span().id().and_then(|id| ctx.span(id)) else {

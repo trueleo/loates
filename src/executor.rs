@@ -12,7 +12,7 @@ use crate::{
     data::{Extractor, RuntimeDataStore},
     logical,
     user::AsyncUserBuilder,
-    User, UserResult, CRATE_NAME, SPAN_TASK,
+    User, UserResult, CRATE_NAME, SPAN_TASK, TARGET_USER_EVENT,
 };
 
 type ExecutorTask<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
@@ -121,6 +121,16 @@ where
     }
 }
 
+async fn user_call<'a>(
+    task: Pin<Box<dyn Future<Output = Result<(), crate::error::Error>> + Send + 'a>>,
+) -> Result<(), crate::error::Error> {
+    let res = task.await;
+    if let Err(ref err) = res {
+        event!(name: "error", target: TARGET_USER_EVENT, Level::INFO, err = %err)
+    }
+    res
+}
+
 pub(crate) struct Once<U> {
     user: U,
 }
@@ -144,7 +154,7 @@ where
             event!(target: CRATE_NAME, Level::INFO, users = 1u64, users_max = 1u64);
             scope.spawn_cancellable(
                 async move {
-                    let _ = tx.unbounded_send(task.await);
+                    let _ = tx.unbounded_send(user_call(task).await);
                 }
                 .instrument(tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_TASK)),
                 || (),
@@ -182,8 +192,7 @@ where
             let tx = tx.clone();
             async move {
                 while std::time::Instant::now() < end_time {
-                    let res = user
-                        .call()
+                    let res = user_call(user.call())
                         .instrument(
                             tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_TASK),
                         )

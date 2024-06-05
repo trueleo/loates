@@ -21,6 +21,7 @@ pub use futures_channel::mpsc::UnboundedReceiver as Receiver;
 pub use futures_channel::mpsc::UnboundedSender as Sender;
 
 const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
+const TARGET_USER_EVENT: &str = "user_event";
 const SPAN_TASK: &str = "task";
 const SPAN_EXEC: &str = "execution";
 const SPAN_SCENARIO: &str = "scenario";

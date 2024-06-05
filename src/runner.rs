@@ -67,7 +67,7 @@ impl<'a> Runner<'a> {
             let mut terminated_by_user = false;
             while let Some(value) = res.next().await {
                 if let Err(Error::TerminationError(err)) = value {
-                    event!(name: "termination_error", target: CRATE_NAME, tracing::Level::INFO, err = err.to_string());
+                    event!(name: "termination_error", target: CRATE_NAME, tracing::Level::INFO, err = %err);
                     scope.cancel();
                     terminated_by_user = true;
                     break;

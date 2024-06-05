@@ -1,6 +1,7 @@
 use std::{
     error::Error,
     io,
+    ops::ControlFlow,
     sync::mpsc,
     thread,
     time::{Duration, Instant},
@@ -17,6 +18,8 @@ use ratatui::{
     widgets::{Block, Borders, Gauge, Paragraph, Widget},
     TerminalOptions,
 };
+
+use crate::tracing::Message;
 
 const LOGO: &str = "\
 ╔═══╗╔╗ ╔╗╔═══╗╔╗ ╔╗╔═══╗╔═══╗
@@ -83,46 +86,6 @@ impl Scenario {
     fn exec_names(&self) -> impl Iterator<Item = &str> {
         self.execs.iter().map(|x| &*x.name)
     }
-
-    fn update(&mut self, message: &crate::tracing::Message) {
-        match message {
-            crate::tracing::Message::TaskTime {
-                execution_id: id,
-                start_time,
-                end_time,
-                ..
-            } => {
-                if let Some(exec) = self.execs.iter_mut().find(|x| x.id == *id) {
-                    let duration = end_time.saturating_duration_since(*start_time);
-                    exec.iterations += 1;
-                    exec.task_max_time = exec.task_max_time.max(duration);
-                    if exec.task_min_time == Duration::ZERO {
-                        exec.task_min_time = duration;
-                    } else {
-                        exec.task_min_time = exec.task_min_time.min(duration);
-                    }
-                    exec.task_total_time += duration;
-                }
-            }
-            crate::tracing::Message::ExecutorUpdate {
-                id,
-                users,
-                max_users,
-                total_iteration,
-                duration,
-                total_duration,
-            } => {
-                if let Some(exec) = self.execs.iter_mut().find(|x| x.id == *id) {
-                    exec.users = *users;
-                    exec.max_users = *max_users;
-                    exec.duration = *duration;
-                    exec.total_duration = *total_duration;
-                    exec.total_iteration = *total_iteration;
-                }
-            }
-            _ => {}
-        }
-    }
 }
 
 pub struct App {
@@ -150,6 +113,10 @@ impl App {
 
     fn current_scenario(&self) -> &Scenario {
         &self.scenarios[self.current_scenario]
+    }
+
+    fn current_scenario_mut(&mut self) -> &mut Scenario {
+        &mut self.scenarios[self.current_scenario]
     }
 
     fn current_exec(&self) -> &ExecutorState {
@@ -255,36 +222,114 @@ fn run_app<B: Backend>(
                 Event::Tick => {
                     terminal.draw(|f| ui(f, &app))?;
                 }
-                Event::Message(message) => match message {
-                    crate::tracing::Message::ScenarioChanged { scenario_id } => {
-                        app.current_scenario = *scenario_id;
-                        assert_eq!(app.scenarios[app.current_scenario].id, *scenario_id)
-                    }
-                    crate::tracing::Message::End => {
-                        // redraw for the last time
-                        terminal.draw(|f| ui(f, &app))?;
+                Event::Message(message) => {
+                    if let ControlFlow::Break(res) = handle_message(&mut app, message, terminal) {
+                        res?;
                         break 'a;
                     }
-                    crate::tracing::Message::TerminatedError { err } => {
-                        let mut text = Text::from(err.as_str());
-                        if let Some(line) = text.lines.first_mut() {
-                            line.spans
-                                .insert(0, Span::raw("Termination Err: ").bold().red())
-                        }
-                        // redraw for the last time
-                        let _ = terminal.insert_before(text.height() as u16, |buf| {
-                            Paragraph::new(text).render(buf.area, buf);
-                        });
-                        terminal.draw(|f| ui(f, &app))?;
-                        break 'a;
-                    }
-                    _ => app.scenarios[app.current_scenario].update(message),
-                },
+                }
             }
         }
         events.clear();
     }
     Ok(())
+}
+
+fn handle_message<B: Backend>(
+    app: &mut App,
+    message: &Message,
+    terminal: &mut Terminal<B>,
+) -> ControlFlow<Result<(), Box<dyn Error + Send + Sync>>, ()> {
+    match message {
+        crate::tracing::Message::ScenarioChanged { scenario_id } => {
+            app.current_scenario = *scenario_id;
+            assert_eq!(app.current_scenario().id, *scenario_id)
+        }
+        crate::tracing::Message::End => {
+            // redraw for the last time
+            if let Err(err) = terminal.draw(|f| ui(f, app)) {
+                return ControlFlow::Break(Err(Box::new(err)));
+            }
+            return ControlFlow::Break(Ok(()));
+        }
+        crate::tracing::Message::TerminatedError { err } => {
+            let mut text = Text::from(err.as_str());
+            if let Some(line) = text.lines.first_mut() {
+                line.spans
+                    .insert(0, Span::raw("Termination Err: ").bold().red())
+            }
+
+            if let Err(err) = terminal
+                .insert_before(text.height() as u16, |buf| {
+                    Paragraph::new(text).render(buf.area, buf);
+                })
+                .and_then(|_| terminal.draw(|f| ui(f, app)))
+            {
+                return ControlFlow::Break(Err(Box::new(err)));
+            }
+
+            return ControlFlow::Break(Ok(()));
+        }
+
+        crate::tracing::Message::TaskTime {
+            execution_id: id,
+            start_time,
+            end_time,
+            events,
+            ..
+        } => {
+            if let Some(exec) = app
+                .current_scenario_mut()
+                .execs
+                .iter_mut()
+                .find(|x| x.id == *id)
+            {
+                let duration = end_time.saturating_duration_since(*start_time);
+                exec.iterations += 1;
+                exec.task_max_time = exec.task_max_time.max(duration);
+                if exec.task_min_time == Duration::ZERO {
+                    exec.task_min_time = duration;
+                } else {
+                    exec.task_min_time = exec.task_min_time.min(duration);
+                }
+                exec.task_total_time += duration;
+            }
+
+            for err in events
+                .iter()
+                .filter(|x| x.name == "error")
+                .flat_map(|x| x.values.iter().filter(|x| x.0 == "err").map(|(_, v)| v))
+            {
+                let text = Text::from(err.to_string());
+                // redraw for the last time
+                let _ = terminal.insert_before(text.height() as u16, |buf| {
+                    Paragraph::new(text).render(buf.area, buf);
+                });
+            }
+        }
+        crate::tracing::Message::ExecutorUpdate {
+            id,
+            users,
+            max_users,
+            total_iteration,
+            duration,
+            total_duration,
+        } => {
+            if let Some(exec) = app
+                .current_scenario_mut()
+                .execs
+                .iter_mut()
+                .find(|x| x.id == *id)
+            {
+                exec.users = *users;
+                exec.max_users = *max_users;
+                exec.duration = *duration;
+                exec.total_duration = *total_duration;
+                exec.total_iteration = *total_iteration;
+            }
+        }
+    };
+    ControlFlow::Continue(())
 }
 
 fn ui(f: &mut Frame, app: &App) {
