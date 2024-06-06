@@ -5,23 +5,65 @@
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
+    pin::Pin,
 };
+
+use futures::Future;
 
 use crate::error::Error;
 
 /// RuntimeDataSources are used to store data generated at runtime for Execution and Scenarios.
-pub type RuntimeDataStore = HashMap<TypeId, Box<dyn Any + Send + Sync>>;
+#[derive(Debug, Default)]
+pub struct RuntimeDataStore(HashMap<TypeId, Box<dyn Any + Send + Sync>>);
 
-pub trait DatastoreModifier: Sync {
-    fn init_store(&self, store: &mut RuntimeDataStore);
+impl RuntimeDataStore {
+    pub fn get<T: Any>(&self) -> Option<&T> {
+        self.0
+            .get(&std::any::TypeId::of::<T>())
+            .and_then(|x| x.downcast_ref())
+    }
+
+    pub fn get_mut<T: Any>(&mut self) -> Option<&mut T> {
+        self.0
+            .get_mut(&std::any::TypeId::of::<T>())
+            .and_then(|x| x.downcast_mut())
+    }
+
+    pub fn clear(&mut self) {
+        self.0.clear()
+    }
+
+    pub fn insert<V: Any + Sync + Send>(&mut self, v: V) -> Option<Box<V>> {
+        self.0
+            .insert(std::any::TypeId::of::<V>(), Box::new(v))
+            .and_then(|x| x.downcast::<V>().ok())
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn contains<T: Any>(&self) -> bool {
+        self.0.contains_key(&TypeId::of::<T>())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
+#[async_trait::async_trait]
+pub trait DatastoreModifier: Sync {
+    async fn init_store(&self, store: &mut RuntimeDataStore);
+}
+
+#[async_trait::async_trait]
 impl<F> DatastoreModifier for F
 where
-    F: Fn(&mut RuntimeDataStore) + Sync,
+    F: for<'a> Fn(&'a mut RuntimeDataStore) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> + Sync,
 {
-    fn init_store(&self, store: &mut RuntimeDataStore) {
-        self(store)
+    async fn init_store(&self, store: &mut RuntimeDataStore) {
+        self(store).await
     }
 }
 
@@ -32,13 +74,23 @@ pub trait Extractor<'a>: Sized {
 
 impl<'a, T: 'static> Extractor<'a> for &'a T {
     fn from_runtime(runtime: &'a RuntimeDataStore) -> Result<Self, Error> {
-        if let Some(val) = runtime.get(&TypeId::of::<T>()) {
-            val.downcast_ref::<T>()
-                .ok_or_else(|| Error::new_generic("Could not downcast the variant"))
-        } else {
-            Err(Error::new_generic("{} not found in the datastore"))
-        }
+        runtime
+            .get::<T>()
+            .ok_or_else(|| Error::new_generic("{} not found in the datastore"))
     }
+}
+
+#[macro_export]
+macro_rules! boxed_future {
+    (
+        $(#[$meta:meta])*
+        async fn $fn_name:ident($arg_name:ident: &mut RuntimeDataStore) $body:block
+    ) => {
+        $(#[$meta])*
+        fn $fn_name($arg_name: &mut RuntimeDataStore) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send +'_>> {
+            Box::pin(async move { $body })
+        }
+    };
 }
 
 macro_rules! impl_extractor {
