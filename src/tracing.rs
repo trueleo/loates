@@ -236,7 +236,7 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
         if event.metadata().target() == CRATE_NAME {
             match event.metadata().name() {
                 "runner_exit" => {
-                    let _ = self.stats_sender.unbounded_send(Message::End);
+                    let _ = self.stats_sender.send(Message::End);
                     return;
                 }
                 "termination_error" => {
@@ -244,7 +244,7 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
                     event.record(&mut err);
                     let _ = self
                         .stats_sender
-                        .unbounded_send(Message::TerminatedError { err: err.err });
+                        .send(Message::TerminatedError { err: err.err });
                     return;
                 }
                 _ => (),
@@ -252,7 +252,7 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
         }
 
         if let ControlFlow::Continue(exec_data) = handle_crate_execution_event(event, &ctx) {
-            let _ = self.stats_sender.unbounded_send(Message::ExecutorUpdate {
+            let _ = self.stats_sender.send(Message::ExecutorUpdate {
                 id: exec_data.id,
                 users: exec_data.users,
                 max_users: exec_data.max_users,
@@ -273,7 +273,7 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
             return;
         };
         let events = std::mem::take(&mut task_data.events);
-        let _ = self.stats_sender.unbounded_send(Message::TaskTime {
+        let _ = self.stats_sender.send(Message::TaskTime {
             start_time: task_data.instant,
             execution_id: task_data.execution_id,
             scenario_id: task_data.scenario_id,

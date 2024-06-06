@@ -143,13 +143,9 @@ impl App {
 
         input_handling(tx.clone());
 
-        thread::spawn(move || loop {
-            match tracing_messages.try_next() {
-                Ok(Some(message)) => {
-                    let _ = tx.send(Event::Message(message));
-                }
-                Ok(None) => break,
-                Err(_) => thread::sleep(Duration::from_millis(10)),
+        thread::spawn(move || {
+            while let Some(message) = tracing_messages.blocking_recv() {
+                let _ = tx.send(Event::Message(message));
             }
         });
 

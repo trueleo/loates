@@ -1,28 +1,31 @@
-use std::any::TypeId;
 use std::thread;
 use std::time::Duration;
 
 use rusher::data::RuntimeDataStore;
 use rusher::logical::{ExecutionPlan, Executor, Scenario};
 use rusher::runner::Runner;
-use rusher::{User, UserResult};
+use rusher::{apply, User, UserResult};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Registry;
 
 #[derive(Debug, Default)]
-struct MyUser;
+struct MyUser {
+    data: usize,
+}
 
 #[async_trait::async_trait]
 impl User for MyUser {
     async fn call(&mut self) -> UserResult {
+        self.data += 1;
         tokio::time::sleep(Duration::from_millis(1000)).await;
         Err(rusher::error::Error::GenericError("bruh".into()))
         // Ok(())
     }
 }
 
-fn datastore(store: &mut RuntimeDataStore) {
-    store.insert(TypeId::of::<String>(), Box::new("hello".to_string()));
+#[apply(rusher::boxed_future)]
+async fn datastore(store: &mut RuntimeDataStore) {
+    store.insert("hello");
 }
 
 #[tokio::main]
@@ -37,7 +40,7 @@ async fn main() {
     //     .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
     //     .init();
 
-    let user_builder = || MyUser;
+    let user_builder = || MyUser { data: 0 };
 
     let execution = ExecutionPlan::builder()
         .with_user_builder(&user_builder)

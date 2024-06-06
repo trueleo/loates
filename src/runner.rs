@@ -1,19 +1,20 @@
+use std::pin::Pin;
 use std::time::{Duration, Instant};
 
 use crate::data::DatastoreModifier;
 use crate::data::RuntimeDataStore;
 use crate::{CRATE_NAME, SPAN_EXEC, SPAN_SCENARIO};
 
-use crate::{error::Error, logical};
+use crate::logical;
 
 use async_scoped::{self, Scope};
-use futures::StreamExt as _;
 use tokio::sync::oneshot;
 use tracing::{event, Instrument, Level};
 
 /// The Runner struct is the top level struct for managing and executing series of logical scenarios asynchronously.
 pub struct Runner<'a> {
     logical: LogicalContext<'a>,
+    enable_tui: bool,
 }
 
 impl<'a> Runner<'a> {
@@ -21,11 +22,14 @@ impl<'a> Runner<'a> {
     pub fn new(scenarios: Vec<logical::Scenario<'a>>) -> Runner {
         Self {
             logical: LogicalContext { scenarios },
+            enable_tui: true,
         }
     }
 
     // Spawn the runner
-    pub async fn run(&self) -> Result<(), Error> {
+    pub async fn run(&self) -> Result<(), crate::error::Error> {
+        let tui_handle = self.spawn_tui();
+
         let mut runtime_ctx = self.create_contexts();
         let runtime_ctx_mut = runtime_ctx.iter_mut().map(|x| x.iter_mut());
 
@@ -63,10 +67,23 @@ impl<'a> Runner<'a> {
                 scope.spawn(unbounded_timer(sync_rx).instrument(span));
             }
 
-            let mut res = futures::stream::select_all(results);
+            let mut res =
+                tokio_stream::StreamMap::from_iter(results.into_iter().map(|mut results| {
+                    (
+                        "",
+                        Box::pin(async_stream::stream! {
+                              while let Some(item) = results.recv().await {
+                                  yield item;
+                              }
+                        })
+                            as Pin<Box<dyn futures::Stream<Item = _> + Send>>,
+                    )
+                }));
+
             let mut terminated_by_user = false;
-            while let Some(value) = res.next().await {
-                if let Err(Error::TerminationError(err)) = value {
+            use tokio_stream::StreamExt;
+            while let Some((_, value)) = res.next().await {
+                if let Err(crate::error::Error::TerminationError(err)) = value {
                     event!(name: "termination_error", target: CRATE_NAME, tracing::Level::INFO, err = %err);
                     scope.cancel();
                     terminated_by_user = true;
@@ -82,6 +99,11 @@ impl<'a> Runner<'a> {
         }
 
         event!(name: "runner_exit", target: CRATE_NAME, tracing::Level::INFO, "Exit test");
+
+        if let Some(handle) = tui_handle {
+            let _ = handle.join();
+        }
+
         Ok(())
     }
 
@@ -102,6 +124,29 @@ impl<'a> Runner<'a> {
     pub fn scenario(&self) -> &[logical::Scenario<'a>] {
         &self.logical.scenarios
     }
+
+    pub fn enable_tui(&mut self, enable: bool) {
+        self.enable_tui = enable
+    }
+
+    fn spawn_tui(
+        &self,
+    ) -> Option<std::thread::JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>> {
+        if !self.enable_tui {
+            return None;
+        }
+
+        let (tracer, rx_tracer) = crate::tracing::TraceHttp::new();
+        let subscriber = tracing_subscriber::layer::SubscriberExt::with(
+            tracing_subscriber::Registry::default(),
+            tracer,
+        );
+
+        tracing::subscriber::set_global_default(subscriber).unwrap();
+
+        let app = crate::tui::App::new(&self.logical.scenarios);
+        Some(std::thread::spawn(|| app.run(rx_tracer)))
+    }
 }
 
 pub struct LogicalContext<'a> {
@@ -120,8 +165,8 @@ impl ExecutionRuntimeCtx {
         }
     }
 
-    pub fn modify(&mut self, f: Box<dyn DatastoreModifier>) {
-        f.init_store(&mut self.datastore);
+    pub async fn modify(&mut self, f: &dyn DatastoreModifier) {
+        f.init_store(&mut self.datastore).await;
     }
 
     pub fn datastore_mut(&mut self) -> &mut RuntimeDataStore {

@@ -76,7 +76,7 @@ impl<'env> Scenario<'env> {
 pub struct ExecutionPlan<'env, U, Ub, Args> {
     label: Option<Cow<'static, str>>,
     user_builder: &'env Ub,
-    datastore_modifiers: Vec<Box<dyn DatastoreModifier>>,
+    datastore_modifiers: Vec<Box<dyn DatastoreModifier + 'env>>,
     executor: Executor,
     _t: PhantomData<fn(Args)>,
     _u: PhantomData<fn(U)>,
@@ -129,10 +129,10 @@ impl ExecutionPlan<'static, (), (), ()> {
     }
 }
 
-impl<U, Ub, Args> ExecutionPlan<'_, U, Ub, Args> {
-    pub fn with_data<T: DatastoreModifier + 'static>(mut self, f: T) -> Self {
+impl<'env, U, Ub, Args> ExecutionPlan<'env, U, Ub, Args> {
+    pub fn with_data<T: DatastoreModifier + 'env>(mut self, f: T) -> Self {
         self.datastore_modifiers
-            .push(Box::new(f) as Box<dyn DatastoreModifier>);
+            .push(Box::new(f) as Box<dyn DatastoreModifier + 'env>);
         self
     }
 
@@ -188,13 +188,13 @@ where
         &'a self,
         ctx: &'a mut ExecutionRuntimeCtx,
     ) -> Box<dyn crate::executor::Executor + 'a> {
-        let data = ctx.datastore_mut();
-        self.datastore_modifiers
-            .iter()
-            .for_each(|modifier| modifier.init_store(data));
+        for modifiers in self.datastore_modifiers.iter() {
+            ctx.modify(&**modifiers).await;
+        }
         let user_builder = self.user_builder;
         let executor = self.executor.clone();
-        Box::new(DataExecutor::<'a, U, Ub, Args>::new(data, user_builder, executor).await)
-            as Box<dyn crate::executor::Executor + '_>
+        Box::new(
+            DataExecutor::<'a, U, Ub, Args>::new(ctx.datastore_mut(), user_builder, executor).await,
+        ) as Box<dyn crate::executor::Executor + '_>
     }
 }

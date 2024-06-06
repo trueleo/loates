@@ -154,7 +154,7 @@ where
             event!(target: CRATE_NAME, Level::INFO, users = 1u64, users_max = 1u64);
             scope.spawn_cancellable(
                 async move {
-                    let _ = tx.unbounded_send(user_call(task).await);
+                    let _ = tx.send(user_call(task).await);
                 }
                 .instrument(tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_TASK)),
                 || (),
@@ -197,7 +197,7 @@ where
                             tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_TASK),
                         )
                         .await;
-                    let _ = tx.unbounded_send(res);
+                    let _ = tx.send(res);
                 }
             }
         });
@@ -259,7 +259,7 @@ where
                         if current_iteration >= iterations {
                             break;
                         }
-                        let _ = tx.unbounded_send(user.call().instrument(
+                        let _ = tx.send(user.call().instrument(
                             tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_TASK),
                         ).await);
                     }
@@ -302,7 +302,7 @@ where
             let tx = tx.clone();
             async move {
                 for _ in 0..iterations {
-                    let _ = tx.unbounded_send(user.call().await);
+                    let _ = tx.send(user.call().await);
                 }
             }
         });
@@ -393,7 +393,7 @@ where
                     let tx = tx.clone();
                     async move {
                         while Instant::now() < end_time {
-                            let _ = tx.unbounded_send(user.call().await);
+                            let _ = tx.send(user.call().await);
                         }
                     }
                 });
@@ -484,7 +484,7 @@ where
                         let mut user = user_iter.next().unwrap();
                         let tx = tx.clone();
                         let task = async move {
-                            let _ = tx.unbounded_send(user.call().await);
+                            let _ = tx.send(user.call().await);
                         };
                         let span =
                             tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_TASK);

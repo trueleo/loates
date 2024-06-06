@@ -11,13 +11,12 @@ tui = ["dep:ratatui", "dep:crossterm"]
 [dependencies]
 async-trait = "0.1.75"
 async-stream = "0.3"
-future-utils = "0.12.1"
-futures-channel = "0.3"
 futures = { version = "0.3.29", features = ["std"] }
 http = "1.0.0"
 thiserror = "1.0.52"
 async-scoped = { version = "0.9", features = ["use-tokio"] }
 tokio = { version = "1.35.1", features = ["rt", "macros", "time"] }
+tokio-stream = "0.1.15"
 tracing-subscriber = { version = "0.3.18", features = [
     "fmt",
     "env-filter",
@@ -31,3 +30,4 @@ reqwest = { version = "0.12.4", default-features = false, features = [
 ] }
 ratatui = { version = "0.26.3", optional = true }
 crossterm = { version = "*", optional = true }
+macro_rules_attribute = "0.2.0"

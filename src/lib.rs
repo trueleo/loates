@@ -16,9 +16,10 @@ pub use user::User;
 
 pub type UserResult = Result<(), crate::error::Error>;
 
-pub use futures_channel::mpsc::unbounded as channel;
-pub use futures_channel::mpsc::UnboundedReceiver as Receiver;
-pub use futures_channel::mpsc::UnboundedSender as Sender;
+pub use macro_rules_attribute::apply;
+pub use tokio::sync::mpsc::unbounded_channel as channel;
+pub use tokio::sync::mpsc::UnboundedReceiver as Receiver;
+pub use tokio::sync::mpsc::UnboundedSender as Sender;
 
 const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
 const TARGET_USER_EVENT: &str = "user_event";
