@@ -125,8 +125,9 @@ impl<'a> Runner<'a> {
         &self.logical.scenarios
     }
 
-    pub fn enable_tui(&mut self, enable: bool) {
-        self.enable_tui = enable
+    pub fn enable_tui(mut self, enable: bool) -> Self {
+        self.enable_tui = enable;
+        self
     }
 
     fn spawn_tui(
