@@ -14,9 +14,9 @@ struct MyUser {
 impl User for MyUser {
     async fn call(&mut self) -> UserResult {
         self.num += 1;
-        tokio::time::sleep(Duration::from_millis(1000)).await;
-        Err(rusher::error::Error::GenericError("bruh".into()))
-        // Ok(())
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        // Err(rusher::error::Error::GenericError("bruh".into()))
+        Ok(())
     }
 }
 
@@ -32,9 +32,9 @@ async fn main() {
     let execution = ExecutionPlan::builder()
         .with_user_builder(&user_builder)
         .with_data(datastore)
-        .with_executor(Executor::Constant {
-            users: 2,
-            duration: Duration::from_secs(4),
+        .with_executor(Executor::RampingUser {
+            pre_allocate_users: 2,
+            stages: vec![(Duration::from_secs(10), 2), (Duration::from_secs(20), 3)],
         });
 
     let execution_once = ExecutionPlan::builder()

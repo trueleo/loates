@@ -419,7 +419,7 @@ fn ui(f: &mut Frame, app: &App) {
     let total_iterations_completed_formatted = current_exec.iterations.to_string();
     let iteration_per_sec_formatted = format!("{:.2} iter/sec", iteration_per_sec);
 
-    let info_render = vec![
+    let mut info_render = vec![
         ("users", Line::from_iter(value_span(&total_users_formatted))),
         (
             "max_users",
@@ -451,12 +451,20 @@ fn ui(f: &mut Frame, app: &App) {
         .map(|duration| format!("{:.2?}", duration));
 
     if let Some(ref stages) = stages_formatted {
-        let mut line = Line::from_iter(key_value_span("total_stages", stages));
-        if let Some((ref stage, ref duration)) = stage_formatted.zip(stage_duration_formatted) {
-            line.spans.extend(key_value_span("current_stage", stage));
-            line.spans
-                .extend(key_value_span("total_duration", duration));
+        let mut line = Line::default();
+        line.spans.extend(key_value_span("total", stages));
+
+        if let Some((stage, duration)) = stage_formatted
+            .as_ref()
+            .zip(stage_duration_formatted.as_ref())
+        {
+            value_span(stage)
+                .into_iter()
+                .rev()
+                .for_each(|x| line.spans.insert(0, x));
+            line.spans.extend(key_value_span("duration", duration));
         }
+        info_render.insert(0, ("current_stage", line))
     }
 
     let key_size = info_render.iter().map(|(k, _)| k.len()).max().unwrap() + 3;

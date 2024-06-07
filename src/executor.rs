@@ -375,7 +375,7 @@ where
             event!(target: CRATE_NAME, Level::INFO, users = users.len(), users_max = pre_allocated_users);
 
             for (index, (duration, target_users)) in stages.iter().enumerate() {
-                event!(target: CRATE_NAME, Level::INFO, stage = index, stages = stages.len(), stage_duration = duration.as_secs());
+                event!(target: CRATE_NAME, Level::INFO, stage = index + 1, stages = stages.len(), stage_duration = duration.as_secs());
                 event!(target: CRATE_NAME, Level::INFO, users = users.len(), users_max = target_users.max(&pre_allocated_users));
 
                 let len = users.len();
@@ -463,7 +463,7 @@ where
 
             for (index, (Rate(rate, time_unit), duration)) in stages.iter().enumerate() {
                 let end_time = Instant::now() + *duration;
-                event!(target: CRATE_NAME, Level::INFO, stage = index, stages = stages.len(), stage_duration = duration.as_secs());
+                event!(target: CRATE_NAME, Level::INFO, stage = index + 1, stages = stages.len(), stage_duration = duration.as_secs());
 
                 while Instant::now() < end_time {
                     let next_rate_check_time = Instant::now() + *time_unit;
