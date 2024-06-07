@@ -121,16 +121,6 @@ where
     }
 }
 
-async fn user_call<'a>(
-    task: Pin<Box<dyn Future<Output = Result<(), crate::error::Error>> + Send + 'a>>,
-) -> Result<(), crate::error::Error> {
-    let res = task.await;
-    if let Err(ref err) = res {
-        event!(name: "error", target: TARGET_USER_EVENT, Level::INFO, err = %err)
-    }
-    res
-}
-
 pub(crate) struct Once<U> {
     user: U,
 }
@@ -259,7 +249,7 @@ where
                         if current_iteration >= iterations {
                             break;
                         }
-                        let _ = tx.send(user.call().instrument(
+                        let _ = tx.send(user_call(user.call()).instrument(
                             tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_TASK),
                         ).await);
                     }
@@ -303,7 +293,7 @@ where
             async move {
                 for _ in 0..iterations {
                     let _ = tx.send(
-                        user.call()
+                        user_call(user.call())
                             .instrument(
                                 tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_TASK),
                             )
@@ -389,7 +379,7 @@ where
                     let tx = tx.clone();
                     async move {
                         while Instant::now() < end_time {
-                            let _ = tx.send(user.call().instrument(tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_TASK)).await);
+                            let _ = tx.send(user_call(user.call()).instrument(tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_TASK)).await);
                         }
                     }
                 });
@@ -479,7 +469,7 @@ where
                         let mut user = user_iter.next().unwrap();
                         let tx = tx.clone();
                         let task = async move {
-                            let _ = tx.send(user.call().await);
+                            let _ = tx.send(user_call(user.call()).await);
                         };
                         let span =
                             tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_TASK);
@@ -512,6 +502,15 @@ where
     }
 }
 
+async fn user_call<'a>(
+    task: Pin<Box<dyn Future<Output = Result<(), crate::error::Error>> + Send + 'a>>,
+) -> Result<(), crate::error::Error> {
+    let res = task.await;
+    if let Err(ref err) = res {
+        event!(name: "error", target: TARGET_USER_EVENT, Level::INFO, err = %err)
+    }
+    res
+}
 async fn build_users<'a, U, Ub, Args>(
     runtime: &'a RuntimeDataStore,
     user_builder: &'a Ub,
