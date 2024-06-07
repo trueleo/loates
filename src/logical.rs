@@ -1,4 +1,4 @@
-use std::{borrow::Cow, marker::PhantomData, time::Duration};
+use std::{borrow::Cow, fmt::Write, marker::PhantomData, time::Duration};
 
 use crate::{
     data::{DatastoreModifier, Extractor},
@@ -7,6 +7,24 @@ use crate::{
     user::AsyncUserBuilder,
     User,
 };
+
+#[derive(Debug, Clone, Copy)]
+pub struct Rate(pub usize, pub Duration);
+
+impl From<Rate> for (usize, Duration) {
+    fn from(value: Rate) -> Self {
+        (value.0, value.1)
+    }
+}
+
+impl std::fmt::Display for Rate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{}", self.0))?;
+        f.write_char('/')?;
+        f.write_fmt(format_args!("{:?}", self.1))?;
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum Executor {
@@ -26,8 +44,7 @@ pub enum Executor {
     },
     ConstantArrivalRate {
         pre_allocate_users: usize,
-        rate: usize,
-        time_unit: Duration,
+        rate: Rate,
         max_users: usize,
         duration: Duration,
     },
@@ -38,7 +55,7 @@ pub enum Executor {
     RampingArrivalRate {
         pre_allocate_users: usize,
         max_users: usize,
-        stages: Vec<((usize, Duration), Duration)>,
+        stages: Vec<(Rate, Duration)>,
     },
 }
 
@@ -157,29 +174,22 @@ where
         match &self.executor {
             Executor::Once => Cow::Borrowed("Once"),
             Executor::Constant { users, duration } => {
-                format!("Constant {} users {:?}", users, duration).into()
+                format!("Constant ({} users) {:?}", users, duration).into()
             }
             Executor::Shared {
                 users, iterations, ..
-            } => format!("Shared {} users {}", users, iterations).into(),
+            } => format!("Shared ({} users) {}", users, iterations).into(),
             Executor::PerUser { users, iterations } => {
-                format!("PerUser {} users {}", users, iterations).into()
+                format!("PerUser ({} users) {}", users, iterations).into()
             }
-            Executor::ConstantArrivalRate {
-                rate,
-                time_unit,
-                duration,
-                ..
-            } => format!(
-                "ConstantArrivalRate {}/{:?} for {:?}",
-                rate, time_unit, duration
-            )
-            .into(),
+            Executor::ConstantArrivalRate { rate, duration, .. } => {
+                format!("ConstantArrivalRate {} for {:?}", rate, duration).into()
+            }
             Executor::RampingUser { stages, .. } => {
-                format!("RampingUser stages {}", stages.len()).into()
+                format!("RampingUser ({} stages)", stages.len()).into()
             }
             Executor::RampingArrivalRate { stages, .. } => {
-                format!("RampingArrivalRate stages {}", stages.len()).into()
+                format!("RampingArrivalRate ({}, stages)", stages.len()).into()
             }
         }
     }

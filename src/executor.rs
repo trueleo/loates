@@ -6,11 +6,12 @@ use std::{
 };
 
 use futures::Future;
+use tokio::sync::Mutex;
 use tracing::{event, Instrument, Level};
 
 use crate::{
     data::{Extractor, RuntimeDataStore},
-    logical,
+    logical::{self, Rate},
     user::AsyncUserBuilder,
     User, UserResult, CRATE_NAME, SPAN_TASK, TARGET_USER_EVENT,
 };
@@ -45,11 +46,11 @@ where
     ) -> Self {
         match executor {
             logical::Executor::Once => {
-                let mut users = build_inital_users(datastore, user_builder, 1).await;
+                let mut users = build_users(datastore, user_builder, 1).await;
                 Self::Once(Once::new(users.pop().unwrap()))
             }
             logical::Executor::Constant { users, duration } => {
-                let users = build_inital_users(datastore, user_builder, users).await;
+                let users = build_users(datastore, user_builder, users).await;
                 Self::Constant(Constant::new(users, duration))
             }
             logical::Executor::Shared {
@@ -57,24 +58,23 @@ where
                 iterations,
                 duration,
             } => {
-                let users = build_inital_users(datastore, user_builder, users).await;
+                let users = build_users(datastore, user_builder, users).await;
                 Self::Shared(SharedIterations::new(users, iterations, duration))
             }
             logical::Executor::PerUser { users, iterations } => {
-                let users = build_inital_users(datastore, user_builder, users).await;
+                let users = build_users(datastore, user_builder, users).await;
                 Self::PerUser(PerUserIteration::new(users, iterations))
             }
             logical::Executor::ConstantArrivalRate {
                 pre_allocate_users,
                 rate,
-                time_unit,
                 max_users,
                 duration,
             } => Self::ConstantArrivalRate(RampingArrivalRate::new(
                 datastore,
                 user_builder,
                 pre_allocate_users,
-                vec![((rate, time_unit), duration)],
+                vec![(rate, duration)],
                 max_users,
             )),
             logical::Executor::RampingUser {
@@ -302,22 +302,24 @@ where
             let tx = tx.clone();
             async move {
                 for _ in 0..iterations {
-                    let _ = tx.send(user.call().await);
+                    let _ = tx.send(
+                        user.call()
+                            .instrument(
+                                tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_TASK),
+                            )
+                            .await,
+                    );
                 }
             }
         });
 
         let task = async move {
             event!(target: CRATE_NAME, Level::INFO, users = users_len, users_max = users_len);
+            event!(target: CRATE_NAME, Level::INFO, total_iteration = iterations);
             let spawner = async_scoped::spawner::use_tokio::Tokio;
             let mut scope = unsafe { async_scoped::TokioScope::create(spawner) };
             for task in tasks {
-                scope.spawn_cancellable(
-                    task.instrument(
-                        tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_TASK),
-                    ),
-                    || (),
-                );
+                scope.spawn_cancellable(task.in_current_span(), || ());
             }
             let _ = scope.collect().await;
         };
@@ -365,43 +367,36 @@ where
         let user_builder = self.user_builder;
         let pre_allocated_users = self.pre_allocate_users;
         let stages = &*self.stages;
+        let total_duration: u64 = stages.iter().map(|(duration, _)| duration.as_secs()).sum();
 
         let task = async move {
-            let mut users = Vec::new();
+            event!(target: CRATE_NAME, Level::INFO, total_duration = total_duration);
+            let mut users = build_users(datastore, user_builder, pre_allocated_users).await;
+            event!(target: CRATE_NAME, Level::INFO, users = users.len(), users_max = pre_allocated_users);
 
-            for _ in 0..pre_allocated_users {
-                let user = user_builder
-                    .build(Args::from_runtime(datastore).unwrap())
-                    .await
-                    .unwrap();
-                users.push(user);
-            }
+            for (index, (duration, target_users)) in stages.iter().enumerate() {
+                event!(target: CRATE_NAME, Level::INFO, stage = index, stages = stages.len());
+                event!(target: CRATE_NAME, Level::INFO, users = users.len(), users_max = target_users.max(&pre_allocated_users));
 
-            for (duration, target_users) in stages {
                 let len = users.len();
                 if len < *target_users {
-                    for _ in 0..(target_users - len) {
-                        let user = user_builder
-                            .build(Args::from_runtime(datastore).unwrap())
-                            .await
-                            .unwrap();
-                        users.push(user);
-                    }
+                    users.extend(build_users(datastore, user_builder, target_users - len).await);
                 }
+                event!(target: CRATE_NAME, Level::INFO, users = users.len(), users_max = target_users.max(&pre_allocated_users));
+
                 let end_time = Instant::now() + *duration;
                 let tasks = users.iter_mut().map(|user| {
                     let tx = tx.clone();
                     async move {
                         while Instant::now() < end_time {
-                            let _ = tx.send(user.call().await);
+                            let _ = tx.send(user.call().instrument(tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_TASK)).await);
                         }
                     }
                 });
                 let spawner = async_scoped::spawner::use_tokio::Tokio;
                 let mut scope = unsafe { async_scoped::TokioScope::create(spawner) };
                 tasks.into_iter().for_each(|task| {
-                    let span = tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_TASK);
-                    scope.spawn_cancellable(task.instrument(span), || ());
+                    scope.spawn_cancellable(task.in_current_span(), || ());
                 });
                 let _ = scope.collect().await;
             }
@@ -415,7 +410,7 @@ pub(crate) struct RampingArrivalRate<'a, U, Ub, Args> {
     datastore: &'a RuntimeDataStore,
     user_builder: &'a Ub,
     pre_allocate_users: usize,
-    stages: Vec<((usize, Duration), Duration)>,
+    stages: Vec<(Rate, Duration)>,
     max_users: usize,
     _u: PhantomData<U>,
     _a: PhantomData<Args>,
@@ -426,7 +421,7 @@ impl<'a, U, Ub, Args> RampingArrivalRate<'a, U, Ub, Args> {
         datastore: &'a RuntimeDataStore,
         user_builder: &'a Ub,
         pre_allocate_users: usize,
-        stages: Vec<((usize, Duration), Duration)>,
+        stages: Vec<(Rate, Duration)>,
         max_users: usize,
     ) -> Self {
         Self {
@@ -455,20 +450,20 @@ where
         let pre_allocated_users = self.pre_allocate_users;
         let max_users = self.max_users;
         let stages = &*self.stages;
+        let total_duration: u64 = stages.iter().map(|(_, duration)| duration.as_secs()).sum();
 
         let task = async move {
-            let mut users = Vec::new();
+            event!(target: CRATE_NAME, Level::INFO, total_duration = total_duration);
+            let mut users: Vec<_> = build_users(datastore, user_builder, pre_allocated_users)
+                .await
+                .into_iter()
+                .map(Mutex::new)
+                .collect();
+            event!(target: CRATE_NAME, Level::INFO, users = users.len(), users_max = pre_allocated_users);
 
-            for _ in 0..pre_allocated_users {
-                let user = user_builder
-                    .build(Args::from_runtime(datastore).unwrap())
-                    .await
-                    .unwrap();
-                users.push(tokio::sync::Mutex::new(user));
-            }
-
-            for ((rate, time_unit), duration) in stages {
+            for (index, (Rate(rate, time_unit), duration)) in stages.iter().enumerate() {
                 let end_time = Instant::now() + *duration;
+                event!(target: CRATE_NAME, Level::INFO, stage = index, stages = stages.len());
 
                 while Instant::now() < end_time {
                     let next_rate_check_time = Instant::now() + *time_unit;
@@ -496,14 +491,14 @@ where
                     drop(scope);
 
                     if current_rate < *rate && users.len() < max_users {
-                        for _ in 0..(rate - current_rate) {
-                            let user = user_builder
-                                .build(Args::from_runtime(datastore).unwrap())
+                        users.extend(
+                            build_users(datastore, user_builder, rate - current_rate)
                                 .await
-                                .unwrap();
-                            users.push(tokio::sync::Mutex::new(user))
-                        }
+                                .into_iter()
+                                .map(Mutex::new),
+                        );
                     }
+                    event!(target: CRATE_NAME, Level::INFO, users = users.len(), users_max = pre_allocated_users);
 
                     if Instant::now() <= end_time || current_rate < *rate {
                         // Sleep until to make sure we wait before next set of task;
@@ -517,7 +512,7 @@ where
     }
 }
 
-async fn build_inital_users<'a, U, Ub, Args>(
+async fn build_users<'a, U, Ub, Args>(
     runtime: &'a RuntimeDataStore,
     user_builder: &'a Ub,
     count: usize,

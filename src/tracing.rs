@@ -91,6 +91,8 @@ struct ExecutionData {
     total_iteration: Option<u64>,
     duration: Duration,
     total_duration: Option<Duration>,
+    stage: Option<usize>,
+    total_stages: Option<usize>,
 }
 
 impl tracing::field::Visit for ExecutionData {
@@ -101,6 +103,8 @@ impl tracing::field::Visit for ExecutionData {
             "id" => self.id = value as usize,
             "users" => self.users = value,
             "users_max" => self.max_users = value,
+            "stages" => self.total_stages = Some(value as usize),
+            "stage" => self.stage = Some(value as usize),
             "duration" => self.duration = Duration::from_secs(value),
             "total_duration" => self.total_duration = Some(Duration::from_secs(value)),
             "total_iteration" => self.total_iteration = Some(value),
@@ -140,6 +144,8 @@ pub enum Message {
         total_iteration: Option<u64>,
         duration: Duration,
         total_duration: Option<Duration>,
+        stage: Option<usize>,
+        stages: Option<usize>,
     },
     TerminatedError {
         err: String,
@@ -217,6 +223,8 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
                     total_iteration: None,
                     duration: Duration::ZERO,
                     total_duration: None,
+                    total_stages: None,
+                    stage: None,
                 };
                 attr.values().record(&mut visitor);
                 let mut extentions = span.extensions_mut();
@@ -259,6 +267,8 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
                 total_iteration: exec_data.total_iteration,
                 duration: exec_data.duration,
                 total_duration: exec_data.total_duration,
+                stage: exec_data.stage,
+                stages: exec_data.total_stages,
             });
             return;
         }
@@ -343,5 +353,7 @@ fn handle_crate_execution_event<S: Subscriber + for<'a> LookupSpan<'a>>(
         total_iteration: exec_data.total_iteration,
         duration: exec_data.duration,
         total_duration: exec_data.total_duration,
+        total_stages: exec_data.total_stages,
+        stage: exec_data.stage,
     })
 }

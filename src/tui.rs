@@ -55,6 +55,8 @@ struct ExecutorState {
     total_iteration: Option<u64>,
     duration: Duration,
     total_duration: Option<Duration>,
+    stage: Option<usize>,
+    stages: Option<usize>,
     task_min_time: Duration,
     task_max_time: Duration,
     task_total_time: Duration,
@@ -310,6 +312,8 @@ fn handle_message<B: Backend>(
             total_iteration,
             duration,
             total_duration,
+            stage,
+            stages,
         } => {
             if let Some(exec) = app
                 .current_scenario_mut()
@@ -322,6 +326,8 @@ fn handle_message<B: Backend>(
                 exec.duration = *duration;
                 exec.total_duration = *total_duration;
                 exec.total_iteration = *total_iteration;
+                exec.stage = *stage;
+                exec.stages = *stages;
             }
         }
     };
