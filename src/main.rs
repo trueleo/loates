@@ -15,7 +15,6 @@ impl User for MyUser {
     async fn call(&mut self) -> UserResult {
         self.num += 1;
         tokio::time::sleep(Duration::from_millis(300)).await;
-        // Err(rusher::error::Error::GenericError("bruh".into()))
         Ok(())
     }
 }
