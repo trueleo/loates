@@ -1,20 +1,26 @@
 use std::time::Duration;
 
+use reqwest::Client;
 use rusher::data::RuntimeDataStore;
 use rusher::logical::{ExecutionPlan, Executor, Scenario};
 use rusher::runner::Runner;
-use rusher::{apply, User, UserResult};
+use rusher::{apply, User};
 
-#[derive(Debug, Default)]
-struct MyUser {
-    num: usize,
+struct MyUser<'a> {
+    client: Client,
+    body: Box<dyn Iterator<Item = &'a str> + Send + 'a>,
 }
 
 #[async_trait::async_trait]
-impl User for MyUser {
-    async fn call(&mut self) -> UserResult {
-        self.num += 1;
-        tokio::time::sleep(Duration::from_millis(300)).await;
+impl<'a> User for MyUser<'a> {
+    type Error = anyhow::Error;
+
+    async fn call(&mut self) -> Result<(), anyhow::Error> {
+        let res = self
+            .client
+            .post("https://httpbin.org/anything")
+            .send()
+            .await?;
         Ok(())
     }
 }

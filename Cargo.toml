@@ -9,25 +9,31 @@ edition = "2021"
 tui = ["dep:ratatui", "dep:crossterm"]
 
 [dependencies]
-async-trait = "0.1.75"
+anyhow = "1.0"
+async-trait = "0.1"
 async-stream = "0.3"
-futures = { version = "0.3.29", features = ["std"] }
-http = "1.0.0"
-thiserror = "1.0.52"
+futures = { version = "0.3", features = ["std"] }
+thiserror = "1.0"
 async-scoped = { version = "0.9", features = ["use-tokio"] }
-tokio = { version = "1.35.1", features = ["rt", "macros", "time"] }
-tokio-stream = "0.1.15"
-tracing-subscriber = { version = "0.3.18", features = [
+tokio = { version = "1.35", features = ["rt", "macros", "time"] }
+tokio-stream = "0.1"
+tracing-subscriber = { version = "0.3", features = [
     "fmt",
     "env-filter",
     "registry",
 ] }
 tracing = "0.1.40"
-reqwest = { version = "0.12.4", default-features = false, features = [
-    "http2",
-    "rustls-tls",
-    "charset",
-] }
-ratatui = { version = "0.26.3", optional = true }
-crossterm = { version = "*", optional = true }
+ratatui = { version = "0.26", optional = true }
+crossterm = { version = "0.26", optional = true }
 macro_rules_attribute = "0.2.0"
+
+
+[[example]]
+name = "simple"
+path = "examples/simple.rs"
+features = ["tui"]
+
+[dev-dependencies.reqwest]
+version = "0.12"
+default-features = false
+features = ["http2", "rustls-tls", "charset"]
