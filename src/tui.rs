@@ -516,9 +516,9 @@ fn padding(n: usize) -> String {
 
 fn key_value_span<'a>(key: &'a str, value: &'a str) -> [Span<'a>; 4] {
     [
-        Span::raw(key).bold(),
-        Span::raw("=").bold(),
-        Span::raw(value).bold().light_blue(),
+        Span::raw(key).green(),
+        Span::raw("=").green(),
+        Span::raw(value),
         Span::raw(padding(
             INFO_CELL_SIZE
                 .saturating_sub(1 + key.len() + value.len())
@@ -529,7 +529,7 @@ fn key_value_span<'a>(key: &'a str, value: &'a str) -> [Span<'a>; 4] {
 
 fn value_span(value: &str) -> [Span<'_>; 2] {
     [
-        Span::raw(value).bold().light_blue(),
+        Span::raw(value).light_blue(),
         Span::raw(padding(INFO_CELL_SIZE.saturating_sub(value.len()).max(1))),
     ]
 }
