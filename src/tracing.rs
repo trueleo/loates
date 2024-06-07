@@ -92,6 +92,7 @@ struct ExecutionData {
     duration: Duration,
     total_duration: Option<Duration>,
     stage: Option<usize>,
+    stage_duration: Option<Duration>,
     total_stages: Option<usize>,
 }
 
@@ -104,6 +105,7 @@ impl tracing::field::Visit for ExecutionData {
             "users" => self.users = value,
             "users_max" => self.max_users = value,
             "stages" => self.total_stages = Some(value as usize),
+            "stage_duration" => self.stage_duration = Some(Duration::from_secs(value)),
             "stage" => self.stage = Some(value as usize),
             "duration" => self.duration = Duration::from_secs(value),
             "total_duration" => self.total_duration = Some(Duration::from_secs(value)),
@@ -145,6 +147,7 @@ pub enum Message {
         duration: Duration,
         total_duration: Option<Duration>,
         stage: Option<usize>,
+        stage_duration: Option<Duration>,
         stages: Option<usize>,
     },
     TerminatedError {
@@ -225,6 +228,7 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
                     total_duration: None,
                     total_stages: None,
                     stage: None,
+                    stage_duration: None,
                 };
                 attr.values().record(&mut visitor);
                 let mut extentions = span.extensions_mut();
@@ -269,6 +273,7 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
                 total_duration: exec_data.total_duration,
                 stage: exec_data.stage,
                 stages: exec_data.total_stages,
+                stage_duration: exec_data.stage_duration,
             });
             return;
         }
@@ -355,5 +360,6 @@ fn handle_crate_execution_event<S: Subscriber + for<'a> LookupSpan<'a>>(
         total_duration: exec_data.total_duration,
         total_stages: exec_data.total_stages,
         stage: exec_data.stage,
+        stage_duration: exec_data.stage_duration,
     })
 }
