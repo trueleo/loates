@@ -56,6 +56,7 @@ struct ExecutorState {
     duration: Duration,
     total_duration: Option<Duration>,
     stage: Option<usize>,
+    stage_duration: Option<Duration>,
     stages: Option<usize>,
     task_min_time: Duration,
     task_max_time: Duration,
@@ -314,6 +315,7 @@ fn handle_message<B: Backend>(
             total_duration,
             stage,
             stages,
+            stage_duration,
         } => {
             if let Some(exec) = app
                 .current_scenario_mut()
@@ -328,6 +330,7 @@ fn handle_message<B: Backend>(
                 exec.total_iteration = *total_iteration;
                 exec.stage = *stage;
                 exec.stages = *stages;
+                exec.stage_duration = *stage_duration
             }
         }
     };
@@ -440,6 +443,21 @@ fn ui(f: &mut Frame, app: &App) {
             ),
         ),
     ];
+
+    let stages_formatted = current_exec.stages.map(|x| x.to_string());
+    let stage_formatted = current_exec.stage.map(|x| x.to_string());
+    let stage_duration_formatted = current_exec
+        .stage_duration
+        .map(|duration| format!("{:.2?}", duration));
+
+    if let Some(ref stages) = stages_formatted {
+        let mut line = Line::from_iter(key_value_span("total_stages", stages));
+        if let Some((ref stage, ref duration)) = stage_formatted.zip(stage_duration_formatted) {
+            line.spans.extend(key_value_span("current_stage", stage));
+            line.spans
+                .extend(key_value_span("total_duration", duration));
+        }
+    }
 
     let key_size = info_render.iter().map(|(k, _)| k.len()).max().unwrap() + 3;
     let [mut progress_bar_area, other_info_area] =
