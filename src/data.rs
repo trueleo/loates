@@ -76,7 +76,7 @@ impl<'a, T: 'static> Extractor<'a> for &'a T {
     fn from_runtime(runtime: &'a RuntimeDataStore) -> Result<Self, Error> {
         runtime
             .get::<T>()
-            .ok_or_else(|| Error::new_generic("{} not found in the datastore"))
+            .ok_or_else(|| Error::termination("value not found in the datastore"))
     }
 }
 
