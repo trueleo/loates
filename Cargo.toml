@@ -30,8 +30,8 @@ macro_rules_attribute = "0.2.0"
 
 [[example]]
 name = "simple"
-path = "examples/simple.rs"
-features = ["tui"]
+path = "./examples/simple.rs"
+required-features = ["tui"]
 
 [dev-dependencies.reqwest]
 version = "0.12"

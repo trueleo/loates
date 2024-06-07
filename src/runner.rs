@@ -14,7 +14,7 @@ use tracing::{event, Instrument, Level};
 /// The Runner struct is the top level struct for managing and executing series of logical scenarios asynchronously.
 pub struct Runner<'a> {
     logical: LogicalContext<'a>,
-    #[cfg(tui)]
+    #[cfg(feature = "tui")]
     enable_tui: bool,
 }
 
@@ -23,14 +23,14 @@ impl<'a> Runner<'a> {
     pub fn new(scenarios: Vec<logical::Scenario<'a>>) -> Runner {
         Self {
             logical: LogicalContext { scenarios },
-            #[cfg(tui)]
+            #[cfg(feature = "tui")]
             enable_tui: true,
         }
     }
 
     // Spawn the runner
     pub async fn run(&self) -> Result<(), crate::error::Error> {
-        #[cfg(tui)]
+        #[cfg(feature = "tui")]
         let tui_handle = self.spawn_tui();
 
         let mut runtime_ctx = self.create_contexts();
@@ -103,7 +103,7 @@ impl<'a> Runner<'a> {
 
         event!(name: "runner_exit", target: CRATE_NAME, tracing::Level::INFO, "Exit test");
 
-        #[cfg(tui)]
+        #[cfg(feature = "tui")]
         if let Some(handle) = tui_handle {
             let _ = handle.join();
         }
@@ -129,13 +129,13 @@ impl<'a> Runner<'a> {
         &self.logical.scenarios
     }
 
-    #[cfg(tui)]
+    #[cfg(feature = "tui")]
     pub fn enable_tui(mut self, enable: bool) -> Self {
         self.enable_tui = enable;
         self
     }
 
-    #[cfg(tui)]
+    #[cfg(feature = "tui")]
     fn spawn_tui(
         &self,
     ) -> Option<std::thread::JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>> {
