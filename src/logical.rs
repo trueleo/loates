@@ -1,11 +1,8 @@
-use std::{borrow::Cow, fmt::Write, marker::PhantomData, time::Duration};
+use std::{borrow::Cow, fmt::Write, time::Duration};
 
 use crate::{
-    data::{DatastoreModifier, Extractor},
-    executor::DataExecutor,
-    runner::ExecutionRuntimeCtx,
+    data::DatastoreModifier, executor::DataExecutor, runner::ExecutionRuntimeCtx,
     user::AsyncUserBuilder,
-    User,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -60,9 +57,9 @@ pub enum Executor {
 }
 
 #[async_trait::async_trait]
-pub trait ExecutionProvider {
+pub trait ExecutionProvider<'a> {
     fn label(&self) -> Cow<'_, str>;
-    async fn execution<'a>(
+    async fn execution(
         &'a self,
         ctx: &'a mut ExecutionRuntimeCtx,
     ) -> Box<dyn crate::executor::Executor + 'a>;
@@ -70,11 +67,11 @@ pub trait ExecutionProvider {
 
 pub struct Scenario<'env> {
     pub(crate) label: Cow<'static, str>,
-    pub(crate) execution_provider: Vec<Box<dyn ExecutionProvider + 'env>>,
+    pub(crate) execution_provider: Vec<Box<dyn for<'a> ExecutionProvider<'a> + 'env>>,
 }
 
 impl<'env> Scenario<'env> {
-    pub fn new<T: ExecutionProvider + 'env>(
+    pub fn new<T: for<'a> ExecutionProvider<'a> + 'env>(
         label: impl Into<Cow<'static, str>>,
         execution: T,
     ) -> Self {
@@ -84,22 +81,20 @@ impl<'env> Scenario<'env> {
         }
     }
 
-    pub fn with_executor<T: ExecutionProvider + 'env>(mut self, execution: T) -> Self {
+    pub fn with_executor<T: for<'a> ExecutionProvider<'a> + 'env>(mut self, execution: T) -> Self {
         self.execution_provider.push(Box::new(execution));
         self
     }
 }
 
-pub struct ExecutionPlan<'env, U, Ub, Args> {
+pub struct ExecutionPlan<'env, Ub> {
     label: Option<Cow<'static, str>>,
     user_builder: &'env Ub,
     datastore_modifiers: Vec<Box<dyn DatastoreModifier + 'env>>,
     executor: Executor,
-    _t: PhantomData<fn(Args)>,
-    _u: PhantomData<fn(U)>,
 }
 
-impl<'env, U, Ub, Args> ExecutionPlan<'env, U, Ub, Args> {
+impl<'env, Ub> ExecutionPlan<'env, Ub> {
     pub fn new(
         label: Option<Cow<'static, str>>,
         user_builder: &'env Ub,
@@ -111,21 +106,17 @@ impl<'env, U, Ub, Args> ExecutionPlan<'env, U, Ub, Args> {
             user_builder,
             datastore_modifiers,
             executor,
-            _t: PhantomData,
-            _u: PhantomData,
         }
     }
 }
 
-impl ExecutionPlan<'static, (), (), ()> {
-    pub fn builder() -> ExecutionPlan<'static, (), (), ()> {
+impl ExecutionPlan<'static, ()> {
+    pub fn builder() -> ExecutionPlan<'static, ()> {
         Self {
             label: None,
             user_builder: &(),
             datastore_modifiers: Vec::new(),
             executor: Executor::Once,
-            _t: PhantomData,
-            _u: PhantomData,
         }
     }
 
@@ -133,11 +124,11 @@ impl ExecutionPlan<'static, (), (), ()> {
         self.label = Some(label.into());
     }
 
-    pub fn with_user_builder<'env, U, Args, Ub: AsyncUserBuilder<Args, U> + 'env>(
+    pub fn with_user_builder<'env, Ub: AsyncUserBuilder + 'env>(
         self,
         user_builder: &'env Ub,
-    ) -> ExecutionPlan<'env, U, Ub, Args> {
-        ExecutionPlan::<'env, U, Ub, Args>::new(
+    ) -> ExecutionPlan<'env, Ub> {
+        ExecutionPlan::<'env, Ub>::new(
             self.label,
             user_builder,
             self.datastore_modifiers,
@@ -146,7 +137,7 @@ impl ExecutionPlan<'static, (), (), ()> {
     }
 }
 
-impl<'env, U, Ub, Args> ExecutionPlan<'env, U, Ub, Args> {
+impl<'env, Ub> ExecutionPlan<'env, Ub> {
     pub fn with_data<T: DatastoreModifier + 'env>(mut self, f: T) -> Self {
         self.datastore_modifiers
             .push(Box::new(f) as Box<dyn DatastoreModifier + 'env>);
@@ -160,11 +151,9 @@ impl<'env, U, Ub, Args> ExecutionPlan<'env, U, Ub, Args> {
 }
 
 #[async_trait::async_trait]
-impl<'env, Args, Ub, U> ExecutionProvider for ExecutionPlan<'env, U, Ub, Args>
+impl<'a, 'env, Ub> ExecutionProvider<'a> for ExecutionPlan<'env, Ub>
 where
-    Ub: AsyncUserBuilder<Args, U> + Sync,
-    U: User,
-    Args: for<'a> Extractor<'a> + Send + Sync,
+    Ub: AsyncUserBuilder,
 {
     fn label(&self) -> Cow<'_, str> {
         if let Some(ref label) = self.label {
@@ -194,7 +183,7 @@ where
         }
     }
 
-    async fn execution<'a>(
+    async fn execution(
         &'a self,
         ctx: &'a mut ExecutionRuntimeCtx,
     ) -> Box<dyn crate::executor::Executor + 'a> {
@@ -203,8 +192,7 @@ where
         }
         let user_builder = self.user_builder;
         let executor = self.executor.clone();
-        Box::new(
-            DataExecutor::<'a, U, Ub, Args>::new(ctx.datastore_mut(), user_builder, executor).await,
-        ) as Box<dyn crate::executor::Executor + '_>
+        Box::new(DataExecutor::<'a, Ub>::new(ctx.datastore_mut(), user_builder, executor).await)
+            as Box<dyn crate::executor::Executor + '_>
     }
 }

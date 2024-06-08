@@ -1,5 +1,4 @@
 use std::{
-    marker::PhantomData,
     pin::Pin,
     sync::atomic::{AtomicUsize, Ordering},
     time::{Duration, Instant},
@@ -10,10 +9,10 @@ use tokio::sync::Mutex;
 use tracing::{event, Instrument, Level};
 
 use crate::{
-    data::{Extractor, RuntimeDataStore},
+    data::RuntimeDataStore,
     logical::{self, Rate},
-    user::AsyncUserBuilder,
-    User, UserResult, CRATE_NAME, SPAN_TASK, TARGET_USER_EVENT,
+    user::{AsyncUserBuilder, BoxedUser},
+    UserResult, CRATE_NAME, SPAN_TASK, TARGET_USER_EVENT,
 };
 
 type ExecutorTask<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
@@ -22,22 +21,20 @@ pub trait Executor: Send {
     fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>);
 }
 
-pub(crate) enum DataExecutor<'a, U, Ub, Args> {
-    Once(Once<U>),
-    Constant(Constant<U>),
-    Shared(SharedIterations<U>),
-    PerUser(PerUserIteration<U>),
-    RampingUser(RampingUser<'a, U, Ub, Args>),
+pub(crate) enum DataExecutor<'a, Ub> {
+    Once(Once<'a>),
+    Constant(Constant<'a>),
+    Shared(SharedIterations<'a>),
+    PerUser(PerUserIteration<'a>),
+    RampingUser(RampingUser<'a, Ub>),
     // ConstantArrivalRate is RampingArrivalRate with 1 stage
-    ConstantArrivalRate(RampingArrivalRate<'a, U, Ub, Args>),
-    RampingArrivalRate(RampingArrivalRate<'a, U, Ub, Args>),
+    ConstantArrivalRate(RampingArrivalRate<'a, Ub>),
+    RampingArrivalRate(RampingArrivalRate<'a, Ub>),
 }
 
-impl<'a, U, Ub, Args> DataExecutor<'a, U, Ub, Args>
+impl<'a, Ub> DataExecutor<'a, Ub>
 where
-    U: User + 'a,
-    Ub: AsyncUserBuilder<Args, U> + Sync,
-    Args: Extractor<'a> + 'a + Send,
+    Ub: AsyncUserBuilder + Sync,
 {
     pub async fn new(
         datastore: &'a RuntimeDataStore,
@@ -102,11 +99,9 @@ where
 }
 
 #[async_trait::async_trait]
-impl<'a, Args, U, Ub> Executor for DataExecutor<'a, U, Ub, Args>
+impl<'a, Ub> Executor for DataExecutor<'a, Ub>
 where
-    U: User + 'a,
-    Ub: AsyncUserBuilder<Args, U> + Sync,
-    Args: Extractor<'a> + 'a + Send,
+    Ub: AsyncUserBuilder + Sync,
 {
     fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>) {
         match self {
@@ -121,20 +116,17 @@ where
     }
 }
 
-pub(crate) struct Once<U> {
-    user: U,
+pub(crate) struct Once<'a> {
+    user: BoxedUser<'a>,
 }
 
-impl<U> Once<U> {
-    fn new(user: U) -> Self {
+impl<'a> Once<'a> {
+    fn new(user: BoxedUser<'a>) -> Self {
         Once { user }
     }
 }
 
-impl<U> Executor for Once<U>
-where
-    U: User,
-{
+impl<'a> Executor for Once<'a> {
     fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>) {
         let (tx, rx) = crate::channel();
         let task = self.user.call();
@@ -155,21 +147,18 @@ where
     }
 }
 
-pub(crate) struct Constant<U> {
-    users: Vec<U>,
+pub(crate) struct Constant<'a> {
+    users: Vec<BoxedUser<'a>>,
     duration: Duration,
 }
 
-impl<U> Constant<U> {
-    fn new(users: Vec<U>, duration: Duration) -> Self {
+impl<'a> Constant<'a> {
+    fn new(users: Vec<BoxedUser<'a>>, duration: Duration) -> Self {
         Self { users, duration }
     }
 }
 
-impl<U> Executor for Constant<U>
-where
-    U: User,
-{
+impl<'a> Executor for Constant<'a> {
     fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>) {
         let (tx, rx) = crate::channel();
 
@@ -207,14 +196,14 @@ where
     }
 }
 
-pub(crate) struct SharedIterations<U> {
-    users: Vec<U>,
+pub(crate) struct SharedIterations<'a> {
+    users: Vec<BoxedUser<'a>>,
     iterations: usize,
     duration: Duration,
 }
 
-impl<U> SharedIterations<U> {
-    fn new(users: Vec<U>, iterations: usize, duration: Duration) -> Self {
+impl<'a> SharedIterations<'a> {
+    fn new(users: Vec<BoxedUser<'a>>, iterations: usize, duration: Duration) -> Self {
         Self {
             users,
             iterations,
@@ -223,10 +212,7 @@ impl<U> SharedIterations<U> {
     }
 }
 
-impl<U> SharedIterations<U>
-where
-    U: User,
-{
+impl<'a> SharedIterations<'a> {
     fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>) {
         let (tx, rx) = crate::channel();
         let users_len = self.users.len();
@@ -268,21 +254,18 @@ where
     }
 }
 
-pub(crate) struct PerUserIteration<U> {
-    users: Vec<U>,
+pub(crate) struct PerUserIteration<'a> {
+    users: Vec<BoxedUser<'a>>,
     iterations: usize,
 }
 
-impl<U> PerUserIteration<U> {
-    fn new(users: Vec<U>, iterations: usize) -> Self {
+impl<'a> PerUserIteration<'a> {
+    fn new(users: Vec<BoxedUser<'a>>, iterations: usize) -> Self {
         Self { users, iterations }
     }
 }
 
-impl<U> Executor for PerUserIteration<U>
-where
-    U: User,
-{
+impl<'a> Executor for PerUserIteration<'a> {
     fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>) {
         let (tx, rx) = crate::channel();
         let Self { users, iterations } = self;
@@ -318,16 +301,14 @@ where
     }
 }
 
-pub(crate) struct RampingUser<'a, U, Ub, Args> {
+pub(crate) struct RampingUser<'a, Ub> {
     datastore: &'a RuntimeDataStore,
     user_builder: &'a Ub,
     pre_allocate_users: usize,
     stages: Vec<(Duration, usize)>,
-    _u: PhantomData<U>,
-    _a: PhantomData<Args>,
 }
 
-impl<'a, U, Ub, Args> RampingUser<'a, U, Ub, Args> {
+impl<'a, Ub> RampingUser<'a, Ub> {
     fn new(
         datastore: &'a RuntimeDataStore,
         user_builder: &'a Ub,
@@ -339,17 +320,13 @@ impl<'a, U, Ub, Args> RampingUser<'a, U, Ub, Args> {
             user_builder,
             pre_allocate_users: initial_users,
             stages,
-            _u: PhantomData,
-            _a: PhantomData,
         }
     }
 }
 
-impl<'a, U, Ub, Args> Executor for RampingUser<'a, U, Ub, Args>
+impl<'a, Ub> Executor for RampingUser<'a, Ub>
 where
-    U: User,
-    Ub: AsyncUserBuilder<Args, U>,
-    Args: Extractor<'a> + Send,
+    Ub: AsyncUserBuilder,
 {
     fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>) {
         let (tx, rx) = crate::channel();
@@ -396,17 +373,15 @@ where
     }
 }
 
-pub(crate) struct RampingArrivalRate<'a, U, Ub, Args> {
+pub(crate) struct RampingArrivalRate<'a, Ub> {
     datastore: &'a RuntimeDataStore,
     user_builder: &'a Ub,
     pre_allocate_users: usize,
     stages: Vec<(Rate, Duration)>,
     max_users: usize,
-    _u: PhantomData<U>,
-    _a: PhantomData<Args>,
 }
 
-impl<'a, U, Ub, Args> RampingArrivalRate<'a, U, Ub, Args> {
+impl<'a, Ub> RampingArrivalRate<'a, Ub> {
     fn new(
         datastore: &'a RuntimeDataStore,
         user_builder: &'a Ub,
@@ -420,17 +395,13 @@ impl<'a, U, Ub, Args> RampingArrivalRate<'a, U, Ub, Args> {
             pre_allocate_users,
             stages,
             max_users,
-            _u: PhantomData,
-            _a: PhantomData,
         }
     }
 }
 
-impl<'a, U, Ub, Args> Executor for RampingArrivalRate<'a, U, Ub, Args>
+impl<'a, Ub> Executor for RampingArrivalRate<'a, Ub>
 where
-    U: User,
-    Ub: AsyncUserBuilder<Args, U>,
-    Args: Extractor<'a> + Send,
+    Ub: AsyncUserBuilder,
 {
     fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>) {
         let (tx, rx) = crate::channel();
@@ -511,21 +482,17 @@ async fn user_call<'a>(
     }
     res
 }
-async fn build_users<'a, U, Ub, Args>(
+async fn build_users<'a, Ub>(
     runtime: &'a RuntimeDataStore,
     user_builder: &'a Ub,
     count: usize,
-) -> Vec<U>
+) -> Vec<BoxedUser<'a>>
 where
-    Ub: AsyncUserBuilder<Args, U>,
-    Args: Extractor<'a> + Send,
+    Ub: AsyncUserBuilder,
 {
     let mut res = vec![];
     for _ in 0..count {
-        let user = user_builder
-            .build(Args::from_runtime(runtime).unwrap())
-            .await
-            .unwrap();
+        let user = user_builder.build(runtime).await.unwrap();
         res.push(user)
     }
     res

@@ -2,7 +2,7 @@ use std::pin::Pin;
 
 use futures::Future;
 
-use crate::{data::Extractor, error::Error, UserResult};
+use crate::{data::RuntimeDataStore, error::Error, UserResult};
 
 /// The `User` trait defines the fundamental component of this library.
 /// A `User` represents a state coupled with an asynchronous function that can be executed asynchronously.
@@ -35,6 +35,8 @@ where
     }
 }
 
+pub type BoxedUser<'a> = Box<dyn User + 'a>;
+
 /// Builds a user instance asynchronously.
 /// The type implementing this should also implement Sync as this is shared across runtime executors.
 /// Runtime executors given the type and configuration can request more user in middle of execution.  
@@ -44,74 +46,22 @@ where
 /// - `Args` must implement the [Extractor] trait and is `Send`.
 /// - `U` must be a User type and must have a lifetime bound of `'a`.
 ///
-pub trait AsyncUserBuilder<Args, U>: Sync {
+#[async_trait::async_trait]
+pub trait AsyncUserBuilder: Sync {
     /// Build a new instance of user
-    ///
-    /// * `args` - Args extracted from [RuntimeDataStore](crate::data::RuntimeDataStore) bounded by its lifetime.
-    ///
-    /// Returns a future bounded by lifetime of self `'s` and Args `'a` resolves to a `Result` containing the constructed user instance or an `Error`.
-    ///
-    /// ### Lifetimes and Trait Bounds
-    /// - Args: is Extractor with lifetime `'a`. Args live atleast as long as `'fut`
-    /// - U: User type which is output of this future is linked to lifetime of Args by `'u`. `'u` is atmost as long as `'a`
-    /// - Self, `'s` and 'a are atleast as long as 'fut for future to be valid.
-    fn build<'a, 'u, 's, 'fut>(
-        &'s self,
-        args: Args,
-    ) -> Pin<Box<dyn Future<Output = Result<U, Error>> + Send + 'fut>>
-    where
-        Args: Extractor<'a> + Send + 'fut,
-        U: 'u,
-        'a: 'u,
-        's: 'fut,
-        'a: 'fut,
-        Self: 'fut;
+    async fn build<'a>(&self, store: &'a RuntimeDataStore) -> Result<BoxedUser<'a>, Error>;
 }
 
-macro_rules! impl_fn {
-    {$($param:ident)*} => {
-        impl<Func, Usr, $($param,)*> AsyncUserBuilder<($($param,)*), Usr> for Func
-        where
-            Func: Fn($($param,)*) -> Usr + Sync,
-            Usr: User,
-            $($param: Send),*
-        {
-            #[inline]
-            #[allow(non_snake_case)]
-            fn build<'a, 'u, 's, 'fut>(
-                &'s self,
-                ($($param,)*): ($($param,)*),
-            ) -> ::core::pin::Pin<
-                Box<dyn ::core::future::Future<Output = Result<Usr, Error>> + Send + 'fut>,
-            >
-            where
-                ($($param,)*): Extractor<'a> + Send + 'fut,
-                Usr: 'u,
-                'a: 'u,
-                's: 'fut,
-                'a: 'fut,
-                Self: 'fut,
-            {
-                Box::pin(async { Ok(self($($param,)*)) })
-            }
-        }
-    };
+#[async_trait::async_trait]
+impl<F> AsyncUserBuilder for F
+where
+    F: for<'a> Fn(
+            &'a RuntimeDataStore,
+        )
+            -> Pin<Box<dyn Future<Output = Result<BoxedUser<'a>, Error>> + Send + 'a>>
+        + Sync,
+{
+    async fn build<'a>(&self, store: &'a RuntimeDataStore) -> Result<BoxedUser<'a>, Error> {
+        self(store).await
+    }
 }
-
-impl_fn! {}
-impl_fn! { A }
-impl_fn! { A B }
-impl_fn! { A B C }
-impl_fn! { A B C D }
-impl_fn! { A B C D E }
-impl_fn! { A B C D E F }
-impl_fn! { A B C D E F G }
-impl_fn! { A B C D E F G H }
-impl_fn! { A B C D E F G H I }
-impl_fn! { A B C D E F G H I J }
-impl_fn! { A B C D E F G H I J K }
-impl_fn! { A B C D E F G H I J K L }
-impl_fn! { A B C D E F G H I J K L M }
-impl_fn! { A B C D E F G H I J K L M N }
-impl_fn! { A B C D E F G H I J K L M N O }
-impl_fn! { A B C D E F G H I J K L M N O P }

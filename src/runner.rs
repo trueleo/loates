@@ -12,15 +12,15 @@ use tokio::sync::oneshot;
 use tracing::{event, Instrument, Level};
 
 /// The Runner struct is the top level struct for managing and executing series of logical scenarios asynchronously.
-pub struct Runner<'a> {
-    logical: LogicalContext<'a>,
+pub struct Runner<'env> {
+    logical: LogicalContext<'env>,
     #[cfg(feature = "tui")]
     enable_tui: bool,
 }
 
-impl<'a> Runner<'a> {
+impl<'env> Runner<'env> {
     // Create new instance of Runner with a [Config](crate::config::Config) and list of [Scenario](create::logical::Scenario)
-    pub fn new(scenarios: Vec<logical::Scenario<'a>>) -> Runner {
+    pub fn new(scenarios: Vec<logical::Scenario<'env>>) -> Runner<'env> {
         Self {
             logical: LogicalContext { scenarios },
             #[cfg(feature = "tui")]
@@ -125,7 +125,7 @@ impl<'a> Runner<'a> {
             .collect()
     }
 
-    pub fn scenario(&self) -> &[logical::Scenario<'a>] {
+    pub fn scenario(&self) -> &[logical::Scenario<'env>] {
         &self.logical.scenarios
     }
 
@@ -156,8 +156,8 @@ impl<'a> Runner<'a> {
     }
 }
 
-pub struct LogicalContext<'a> {
-    scenarios: Vec<logical::Scenario<'a>>,
+pub struct LogicalContext<'env> {
+    scenarios: Vec<logical::Scenario<'env>>,
 }
 
 #[derive(Debug, Default)]
