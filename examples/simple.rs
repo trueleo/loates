@@ -7,7 +7,6 @@ use rusher::data::RuntimeDataStore;
 use rusher::error::Error;
 use rusher::logical::{ExecutionPlan, Executor, Scenario};
 use rusher::runner::Runner;
-use rusher::user::BoxedUser;
 use rusher::{apply, User};
 
 struct MyUser {
@@ -50,8 +49,8 @@ async fn datastore(store: &mut RuntimeDataStore) {
 
 fn user_builder<'a>(
     store: &'a RuntimeDataStore,
-) -> Pin<Box<dyn Future<Output = Result<BoxedUser<'a>, Error>> + Send + 'a>> {
-    let user: Result<Box<dyn User + 'a>, Error> = Ok(Box::new(MyUser {}));
+) -> Pin<Box<dyn Future<Output = Result<MyUser, Error>> + Send + 'a>> {
+    let user = Ok(MyUser {});
     Box::pin(async move { user })
 }
 
@@ -60,10 +59,7 @@ async fn main() {
     let execution = ExecutionPlan::builder()
         .with_user_builder(&user_builder)
         .with_data(datastore)
-        .with_executor(Executor::RampingUser {
-            pre_allocate_users: 2,
-            stages: vec![(Duration::from_secs(10), 2), (Duration::from_secs(20), 3)],
-        });
+        .with_executor(Executor::Once);
 
     // let execution_once = ExecutionPlan::builder()
     //     .with_user_builder(&user_builder)

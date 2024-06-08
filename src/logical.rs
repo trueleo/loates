@@ -192,7 +192,7 @@ where
         }
         let user_builder = self.user_builder;
         let executor = self.executor.clone();
-        Box::new(DataExecutor::<'a, Ub>::new(ctx.datastore_mut(), user_builder, executor).await)
+        Box::new(DataExecutor::<Ub>::new(ctx.datastore_mut(), user_builder, executor).await)
             as Box<dyn crate::executor::Executor + '_>
     }
 }

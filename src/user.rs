@@ -35,8 +35,6 @@ where
     }
 }
 
-pub type BoxedUser<'a> = Box<dyn User + 'a>;
-
 /// Builds a user instance asynchronously.
 /// The type implementing this should also implement Sync as this is shared across runtime executors.
 /// Runtime executors given the type and configuration can request more user in middle of execution.  
@@ -46,22 +44,22 @@ pub type BoxedUser<'a> = Box<dyn User + 'a>;
 /// - `Args` must implement the [Extractor] trait and is `Send`.
 /// - `U` must be a User type and must have a lifetime bound of `'a`.
 ///
-#[async_trait::async_trait]
 pub trait AsyncUserBuilder: Sync {
+    type Output: User;
     /// Build a new instance of user
-    async fn build<'a>(&self, store: &'a RuntimeDataStore) -> Result<BoxedUser<'a>, Error>;
+    fn build<'a>(
+        &self,
+        store: &'a RuntimeDataStore,
+    ) -> impl std::future::Future<Output = Result<Self::Output, Error>> + std::marker::Send;
 }
 
-#[async_trait::async_trait]
-impl<F> AsyncUserBuilder for F
+impl<F, U> AsyncUserBuilder for F
 where
-    F: for<'a> Fn(
-            &'a RuntimeDataStore,
-        )
-            -> Pin<Box<dyn Future<Output = Result<BoxedUser<'a>, Error>> + Send + 'a>>
-        + Sync,
+    F: Fn(&RuntimeDataStore) -> Pin<Box<dyn Future<Output = Result<U, Error>> + Send + '_>> + Sync,
+    U: User,
 {
-    async fn build<'a>(&self, store: &'a RuntimeDataStore) -> Result<BoxedUser<'a>, Error> {
+    type Output = U;
+    async fn build<'a>(&self, store: &'a RuntimeDataStore) -> Result<Self::Output, Error> {
         self(store).await
     }
 }

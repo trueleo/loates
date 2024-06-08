@@ -11,8 +11,8 @@ use tracing::{event, Instrument, Level};
 use crate::{
     data::RuntimeDataStore,
     logical::{self, Rate},
-    user::{AsyncUserBuilder, BoxedUser},
-    UserResult, CRATE_NAME, SPAN_TASK, TARGET_USER_EVENT,
+    user::AsyncUserBuilder,
+    User, UserResult, CRATE_NAME, SPAN_TASK, TARGET_USER_EVENT,
 };
 
 type ExecutorTask<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
@@ -21,11 +21,11 @@ pub trait Executor: Send {
     fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>);
 }
 
-pub(crate) enum DataExecutor<'a, Ub> {
-    Once(Once<'a>),
-    Constant(Constant<'a>),
-    Shared(SharedIterations<'a>),
-    PerUser(PerUserIteration<'a>),
+pub(crate) enum DataExecutor<'a, Ub: AsyncUserBuilder> {
+    Once(Once<<Ub as AsyncUserBuilder>::Output>),
+    Constant(Constant<<Ub as AsyncUserBuilder>::Output>),
+    Shared(SharedIterations<<Ub as AsyncUserBuilder>::Output>),
+    PerUser(PerUserIteration<<Ub as AsyncUserBuilder>::Output>),
     RampingUser(RampingUser<'a, Ub>),
     // ConstantArrivalRate is RampingArrivalRate with 1 stage
     ConstantArrivalRate(RampingArrivalRate<'a, Ub>),
@@ -99,7 +99,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<'a, Ub> Executor for DataExecutor<'a, Ub>
+impl<Ub> Executor for DataExecutor<'_, Ub>
 where
     Ub: AsyncUserBuilder + Sync,
 {
@@ -116,17 +116,20 @@ where
     }
 }
 
-pub(crate) struct Once<'a> {
-    user: BoxedUser<'a>,
+pub(crate) struct Once<U> {
+    user: U,
 }
 
-impl<'a> Once<'a> {
-    fn new(user: BoxedUser<'a>) -> Self {
+impl<U> Once<U> {
+    fn new(user: U) -> Self {
         Once { user }
     }
 }
 
-impl<'a> Executor for Once<'a> {
+impl<U> Executor for Once<U>
+where
+    U: User,
+{
     fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>) {
         let (tx, rx) = crate::channel();
         let task = self.user.call();
@@ -147,18 +150,18 @@ impl<'a> Executor for Once<'a> {
     }
 }
 
-pub(crate) struct Constant<'a> {
-    users: Vec<BoxedUser<'a>>,
+pub(crate) struct Constant<U> {
+    users: Vec<U>,
     duration: Duration,
 }
 
-impl<'a> Constant<'a> {
-    fn new(users: Vec<BoxedUser<'a>>, duration: Duration) -> Self {
+impl<U> Constant<U> {
+    fn new(users: Vec<U>, duration: Duration) -> Self {
         Self { users, duration }
     }
 }
 
-impl<'a> Executor for Constant<'a> {
+impl<U: User> Executor for Constant<U> {
     fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>) {
         let (tx, rx) = crate::channel();
 
@@ -196,14 +199,14 @@ impl<'a> Executor for Constant<'a> {
     }
 }
 
-pub(crate) struct SharedIterations<'a> {
-    users: Vec<BoxedUser<'a>>,
+pub(crate) struct SharedIterations<U> {
+    users: Vec<U>,
     iterations: usize,
     duration: Duration,
 }
 
-impl<'a> SharedIterations<'a> {
-    fn new(users: Vec<BoxedUser<'a>>, iterations: usize, duration: Duration) -> Self {
+impl<U: User> SharedIterations<U> {
+    fn new(users: Vec<U>, iterations: usize, duration: Duration) -> Self {
         Self {
             users,
             iterations,
@@ -212,7 +215,7 @@ impl<'a> SharedIterations<'a> {
     }
 }
 
-impl<'a> SharedIterations<'a> {
+impl<U: User> SharedIterations<U> {
     fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>) {
         let (tx, rx) = crate::channel();
         let users_len = self.users.len();
@@ -254,18 +257,18 @@ impl<'a> SharedIterations<'a> {
     }
 }
 
-pub(crate) struct PerUserIteration<'a> {
-    users: Vec<BoxedUser<'a>>,
+pub(crate) struct PerUserIteration<U> {
+    users: Vec<U>,
     iterations: usize,
 }
 
-impl<'a> PerUserIteration<'a> {
-    fn new(users: Vec<BoxedUser<'a>>, iterations: usize) -> Self {
+impl<U> PerUserIteration<U> {
+    fn new(users: Vec<U>, iterations: usize) -> Self {
         Self { users, iterations }
     }
 }
 
-impl<'a> Executor for PerUserIteration<'a> {
+impl<U: User> Executor for PerUserIteration<U> {
     fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>) {
         let (tx, rx) = crate::channel();
         let Self { users, iterations } = self;
@@ -486,7 +489,7 @@ async fn build_users<'a, Ub>(
     runtime: &'a RuntimeDataStore,
     user_builder: &'a Ub,
     count: usize,
-) -> Vec<BoxedUser<'a>>
+) -> Vec<<Ub as AsyncUserBuilder>::Output>
 where
     Ub: AsyncUserBuilder,
 {
