@@ -1,8 +1,10 @@
 use std::{borrow::Cow, fmt::Write, time::Duration};
 
 use crate::{
-    data::DatastoreModifier, executor::DataExecutor, runner::ExecutionRuntimeCtx,
-    user::AsyncUserBuilder,
+    data::DatastoreModifier,
+    executor::DataExecutor,
+    runner::ExecutionRuntimeCtx,
+    user::{AsyncFnBuilder, AsyncUserBuilder},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -57,9 +59,9 @@ pub enum Executor {
 }
 
 #[async_trait::async_trait]
-pub trait ExecutionProvider<'a> {
+pub trait ExecutionProvider {
     fn label(&self) -> Cow<'_, str>;
-    async fn execution(
+    async fn execution<'a>(
         &'a self,
         ctx: &'a mut ExecutionRuntimeCtx,
     ) -> Box<dyn crate::executor::Executor + 'a>;
@@ -67,11 +69,11 @@ pub trait ExecutionProvider<'a> {
 
 pub struct Scenario<'env> {
     pub(crate) label: Cow<'static, str>,
-    pub(crate) execution_provider: Vec<Box<dyn for<'a> ExecutionProvider<'a> + 'env>>,
+    pub(crate) execution_provider: Vec<Box<dyn ExecutionProvider + 'env>>,
 }
 
 impl<'env> Scenario<'env> {
-    pub fn new<T: for<'a> ExecutionProvider<'a> + 'env>(
+    pub fn new<T: ExecutionProvider + 'env>(
         label: impl Into<Cow<'static, str>>,
         execution: T,
     ) -> Self {
@@ -81,7 +83,7 @@ impl<'env> Scenario<'env> {
         }
     }
 
-    pub fn with_executor<T: for<'a> ExecutionProvider<'a> + 'env>(mut self, execution: T) -> Self {
+    pub fn with_executor<T: ExecutionProvider + 'env>(mut self, execution: T) -> Self {
         self.execution_provider.push(Box::new(execution));
         self
     }
@@ -89,15 +91,15 @@ impl<'env> Scenario<'env> {
 
 pub struct ExecutionPlan<'env, Ub> {
     label: Option<Cow<'static, str>>,
-    user_builder: &'env Ub,
+    user_builder: Ub,
     datastore_modifiers: Vec<Box<dyn DatastoreModifier + 'env>>,
     executor: Executor,
 }
 
 impl<'env, Ub> ExecutionPlan<'env, Ub> {
-    pub fn new(
+    fn new(
         label: Option<Cow<'static, str>>,
-        user_builder: &'env Ub,
+        user_builder: Ub,
         datastore_modifiers: Vec<Box<dyn DatastoreModifier>>,
         executor: Executor,
     ) -> Self {
@@ -114,7 +116,7 @@ impl ExecutionPlan<'static, ()> {
     pub fn builder() -> ExecutionPlan<'static, ()> {
         Self {
             label: None,
-            user_builder: &(),
+            user_builder: (),
             datastore_modifiers: Vec::new(),
             executor: Executor::Once,
         }
@@ -124,11 +126,16 @@ impl ExecutionPlan<'static, ()> {
         self.label = Some(label.into());
     }
 
-    pub fn with_user_builder<'env, Ub: AsyncUserBuilder + 'env>(
+    pub fn with_user_builder<'env, F>(
         self,
-        user_builder: &'env Ub,
-    ) -> ExecutionPlan<'env, Ub> {
-        ExecutionPlan::<'env, Ub>::new(
+        user_builder: F,
+    ) -> ExecutionPlan<'env, AsyncFnBuilder<F>>
+    where
+        F: Into<AsyncFnBuilder<F>> + Sync + 'env,
+        AsyncFnBuilder<F>: for<'a> AsyncUserBuilder<'a>,
+    {
+        let user_builder: AsyncFnBuilder<F> = user_builder.into();
+        ExecutionPlan::<'env, _>::new(
             self.label,
             user_builder,
             self.datastore_modifiers,
@@ -151,9 +158,9 @@ impl<'env, Ub> ExecutionPlan<'env, Ub> {
 }
 
 #[async_trait::async_trait]
-impl<'a, 'env, Ub> ExecutionProvider<'a> for ExecutionPlan<'env, Ub>
+impl<'env, Ub> ExecutionProvider for ExecutionPlan<'env, Ub>
 where
-    Ub: AsyncUserBuilder,
+    Ub: for<'a> AsyncUserBuilder<'a>,
 {
     fn label(&self) -> Cow<'_, str> {
         if let Some(ref label) = self.label {
@@ -183,16 +190,19 @@ where
         }
     }
 
-    async fn execution(
+    async fn execution<'a>(
         &'a self,
         ctx: &'a mut ExecutionRuntimeCtx,
     ) -> Box<dyn crate::executor::Executor + 'a> {
         for modifiers in self.datastore_modifiers.iter() {
             ctx.modify(&**modifiers).await;
         }
-        let user_builder = self.user_builder;
+        let user_builder = &self.user_builder;
         let executor = self.executor.clone();
-        Box::new(DataExecutor::<Ub>::new(ctx.datastore_mut(), user_builder, executor).await)
-            as Box<dyn crate::executor::Executor + '_>
+        Box::new(
+            DataExecutor::<Ub>::new(ctx.datastore_mut(), user_builder, executor)
+                .await
+                .unwrap(),
+        ) as Box<dyn crate::executor::Executor + '_>
     }
 }

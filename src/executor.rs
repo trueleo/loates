@@ -10,6 +10,7 @@ use tracing::{event, Instrument, Level};
 
 use crate::{
     data::RuntimeDataStore,
+    error::Error,
     logical::{self, Rate},
     user::AsyncUserBuilder,
     User, UserResult, CRATE_NAME, SPAN_TASK, TARGET_USER_EVENT,
@@ -21,33 +22,30 @@ pub trait Executor: Send {
     fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>);
 }
 
-pub(crate) enum DataExecutor<'a, Ub: AsyncUserBuilder> {
-    Once(Once<<Ub as AsyncUserBuilder>::Output>),
-    Constant(Constant<<Ub as AsyncUserBuilder>::Output>),
-    Shared(SharedIterations<<Ub as AsyncUserBuilder>::Output>),
-    PerUser(PerUserIteration<<Ub as AsyncUserBuilder>::Output>),
-    RampingUser(RampingUser<'a, Ub>),
+pub(crate) enum DataExecutor<'ctx, Ub: for<'a> AsyncUserBuilder<'a>> {
+    Once(Once<<Ub as AsyncUserBuilder<'ctx>>::Output>),
+    Constant(Constant<<Ub as AsyncUserBuilder<'ctx>>::Output>),
+    Shared(SharedIterations<<Ub as AsyncUserBuilder<'ctx>>::Output>),
+    PerUser(PerUserIteration<<Ub as AsyncUserBuilder<'ctx>>::Output>),
+    RampingUser(RampingUser<'ctx, Ub>),
     // ConstantArrivalRate is RampingArrivalRate with 1 stage
-    ConstantArrivalRate(RampingArrivalRate<'a, Ub>),
-    RampingArrivalRate(RampingArrivalRate<'a, Ub>),
+    ConstantArrivalRate(RampingArrivalRate<'ctx, Ub>),
+    RampingArrivalRate(RampingArrivalRate<'ctx, Ub>),
 }
 
-impl<'a, Ub> DataExecutor<'a, Ub>
-where
-    Ub: AsyncUserBuilder + Sync,
-{
+impl<'ctx, Ub: for<'a> AsyncUserBuilder<'a>> DataExecutor<'ctx, Ub> {
     pub async fn new(
-        datastore: &'a RuntimeDataStore,
-        user_builder: &'a Ub,
+        datastore: &'ctx RuntimeDataStore,
+        user_builder: &'ctx Ub,
         executor: logical::Executor,
-    ) -> Self {
-        match executor {
+    ) -> Result<Self, Error> {
+        let s = match executor {
             logical::Executor::Once => {
-                let mut users = build_users(datastore, user_builder, 1).await;
+                let mut users = build_users(datastore, user_builder, 1).await?;
                 Self::Once(Once::new(users.pop().unwrap()))
             }
             logical::Executor::Constant { users, duration } => {
-                let users = build_users(datastore, user_builder, users).await;
+                let users = build_users(datastore, user_builder, users).await?;
                 Self::Constant(Constant::new(users, duration))
             }
             logical::Executor::Shared {
@@ -55,11 +53,11 @@ where
                 iterations,
                 duration,
             } => {
-                let users = build_users(datastore, user_builder, users).await;
+                let users = build_users(datastore, user_builder, users).await?;
                 Self::Shared(SharedIterations::new(users, iterations, duration))
             }
             logical::Executor::PerUser { users, iterations } => {
-                let users = build_users(datastore, user_builder, users).await;
+                let users = build_users(datastore, user_builder, users).await?;
                 Self::PerUser(PerUserIteration::new(users, iterations))
             }
             logical::Executor::ConstantArrivalRate {
@@ -94,14 +92,16 @@ where
                 stages,
                 max_users,
             )),
-        }
+        };
+
+        Ok(s)
     }
 }
 
 #[async_trait::async_trait]
-impl<Ub> Executor for DataExecutor<'_, Ub>
+impl<'ctx, Ub> Executor for DataExecutor<'ctx, Ub>
 where
-    Ub: AsyncUserBuilder + Sync,
+    Ub: for<'a> AsyncUserBuilder<'a>,
 {
     fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>) {
         match self {
@@ -304,17 +304,17 @@ impl<U: User> Executor for PerUserIteration<U> {
     }
 }
 
-pub(crate) struct RampingUser<'a, Ub> {
-    datastore: &'a RuntimeDataStore,
-    user_builder: &'a Ub,
+pub(crate) struct RampingUser<'ctx, Ub> {
+    datastore: &'ctx RuntimeDataStore,
+    user_builder: &'ctx Ub,
     pre_allocate_users: usize,
     stages: Vec<(Duration, usize)>,
 }
 
-impl<'a, Ub> RampingUser<'a, Ub> {
+impl<'ctx, Ub> RampingUser<'ctx, Ub> {
     fn new(
-        datastore: &'a RuntimeDataStore,
-        user_builder: &'a Ub,
+        datastore: &'ctx RuntimeDataStore,
+        user_builder: &'ctx Ub,
         stages: Vec<(Duration, usize)>,
         initial_users: usize,
     ) -> Self {
@@ -327,9 +327,9 @@ impl<'a, Ub> RampingUser<'a, Ub> {
     }
 }
 
-impl<'a, Ub> Executor for RampingUser<'a, Ub>
+impl<'ctx, Ub> Executor for RampingUser<'ctx, Ub>
 where
-    Ub: AsyncUserBuilder,
+    Ub: for<'a> AsyncUserBuilder<'a>,
 {
     fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>) {
         let (tx, rx) = crate::channel();
@@ -341,7 +341,9 @@ where
 
         let task = async move {
             event!(target: CRATE_NAME, Level::INFO, total_duration = total_duration);
-            let mut users = build_users(datastore, user_builder, pre_allocated_users).await;
+            let mut users = build_users(datastore, user_builder, pre_allocated_users)
+                .await
+                .unwrap();
             event!(target: CRATE_NAME, Level::INFO, users = users.len(), users_max = pre_allocated_users);
 
             for (index, (duration, target_users)) in stages.iter().enumerate() {
@@ -350,7 +352,11 @@ where
 
                 let len = users.len();
                 if len < *target_users {
-                    users.extend(build_users(datastore, user_builder, target_users - len).await);
+                    users.extend(
+                        build_users(datastore, user_builder, target_users - len)
+                            .await
+                            .unwrap(),
+                    );
                 }
                 event!(target: CRATE_NAME, Level::INFO, users = users.len(), users_max = target_users.max(&pre_allocated_users));
 
@@ -376,18 +382,18 @@ where
     }
 }
 
-pub(crate) struct RampingArrivalRate<'a, Ub> {
-    datastore: &'a RuntimeDataStore,
-    user_builder: &'a Ub,
+pub(crate) struct RampingArrivalRate<'ctx, Ub> {
+    datastore: &'ctx RuntimeDataStore,
+    user_builder: &'ctx Ub,
     pre_allocate_users: usize,
     stages: Vec<(Rate, Duration)>,
     max_users: usize,
 }
 
-impl<'a, Ub> RampingArrivalRate<'a, Ub> {
+impl<'ctx, Ub> RampingArrivalRate<'ctx, Ub> {
     fn new(
-        datastore: &'a RuntimeDataStore,
-        user_builder: &'a Ub,
+        datastore: &'ctx RuntimeDataStore,
+        user_builder: &'ctx Ub,
         pre_allocate_users: usize,
         stages: Vec<(Rate, Duration)>,
         max_users: usize,
@@ -402,9 +408,9 @@ impl<'a, Ub> RampingArrivalRate<'a, Ub> {
     }
 }
 
-impl<'a, Ub> Executor for RampingArrivalRate<'a, Ub>
+impl<'ctx, Ub> Executor for RampingArrivalRate<'ctx, Ub>
 where
-    Ub: AsyncUserBuilder,
+    Ub: for<'a> AsyncUserBuilder<'a>,
 {
     fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>) {
         let (tx, rx) = crate::channel();
@@ -420,6 +426,7 @@ where
             event!(target: CRATE_NAME, Level::INFO, total_duration = total_duration);
             let mut users: Vec<_> = build_users(datastore, user_builder, pre_allocated_users)
                 .await
+                .unwrap()
                 .into_iter()
                 .map(Mutex::new)
                 .collect();
@@ -458,6 +465,7 @@ where
                         users.extend(
                             build_users(datastore, user_builder, rate - current_rate)
                                 .await
+                                .unwrap()
                                 .into_iter()
                                 .map(Mutex::new),
                         );
@@ -477,7 +485,7 @@ where
 }
 
 async fn user_call<'a>(
-    task: Pin<Box<dyn Future<Output = Result<(), crate::error::Error>> + Send + 'a>>,
+    task: impl Future<Output = Result<(), crate::error::Error>> + Send + 'a,
 ) -> Result<(), crate::error::Error> {
     let res = task.await;
     if let Err(ref err) = res {
@@ -485,18 +493,15 @@ async fn user_call<'a>(
     }
     res
 }
-async fn build_users<'a, Ub>(
-    runtime: &'a RuntimeDataStore,
+async fn build_users<'a, Ub: AsyncUserBuilder<'a>>(
+    store: &'a RuntimeDataStore,
     user_builder: &'a Ub,
     count: usize,
-) -> Vec<<Ub as AsyncUserBuilder>::Output>
-where
-    Ub: AsyncUserBuilder,
-{
+) -> Result<Vec<<Ub as AsyncUserBuilder<'a>>::Output>, Error> {
     let mut res = vec![];
     for _ in 0..count {
-        let user = user_builder.build(runtime).await.unwrap();
+        let user = user_builder.build(store).await?;
         res.push(user)
     }
-    res
+    Ok(res)
 }

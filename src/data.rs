@@ -17,6 +17,10 @@ use crate::error::Error;
 pub struct RuntimeDataStore(HashMap<TypeId, Box<dyn Any + Send + Sync>>);
 
 impl RuntimeDataStore {
+    pub fn new() -> Self {
+        Self(HashMap::default())
+    }
+
     pub fn get<T: Any>(&self) -> Option<&T> {
         self.0
             .get(&std::any::TypeId::of::<T>())

@@ -1,5 +1,3 @@
-use std::pin::Pin;
-
 use futures::Future;
 
 use crate::{data::RuntimeDataStore, error::Error, UserResult};
@@ -19,6 +17,7 @@ use crate::{data::RuntimeDataStore, error::Error, UserResult};
 /// ### Note
 /// A concrete implementation of the `User` trait can capture arguments and reference data from higher layers,
 /// such as the [RuntimeDataStore](crate::data::RuntimeDataStore) defined in the scenario or in its executor.
+
 #[async_trait::async_trait]
 pub trait User: Send {
     async fn call(&mut self) -> UserResult;
@@ -43,23 +42,74 @@ where
 ///
 /// - `Args` must implement the [Extractor] trait and is `Send`.
 /// - `U` must be a User type and must have a lifetime bound of `'a`.
-///
-pub trait AsyncUserBuilder: Sync {
-    type Output: User;
+#[async_trait::async_trait]
+pub trait AsyncUserBuilder<'a>: Sync {
+    type Output: User + 'a;
     /// Build a new instance of user
-    fn build<'a>(
-        &self,
-        store: &'a RuntimeDataStore,
-    ) -> impl std::future::Future<Output = Result<Self::Output, Error>> + std::marker::Send;
+    async fn build(&self, store: &'a RuntimeDataStore) -> Result<Self::Output, Error>;
 }
 
-impl<F, U> AsyncUserBuilder for F
+pub struct AsyncFnBuilder<F> {
+    inner: F,
+}
+
+impl<'a, F> From<F> for AsyncFnBuilder<F>
 where
-    F: Fn(&RuntimeDataStore) -> Pin<Box<dyn Future<Output = Result<U, Error>> + Send + '_>> + Sync,
-    U: User,
+    F: async_fn_traits::AsyncFn1<&'a RuntimeDataStore> + Sync,
+    <F as async_fn_traits::AsyncFn1<&'a RuntimeDataStore>>::Output: User + 'a,
+    <F as async_fn_traits::AsyncFn1<&'a RuntimeDataStore>>::OutputFuture: Send,
 {
-    type Output = U;
-    async fn build<'a>(&self, store: &'a RuntimeDataStore) -> Result<Self::Output, Error> {
-        self(store).await
+    fn from(value: F) -> Self {
+        Self { inner: value }
+    }
+}
+
+#[async_trait::async_trait]
+impl<'a, F> AsyncUserBuilder<'a> for AsyncFnBuilder<F>
+where
+    F: async_fn_traits::AsyncFn1<&'a RuntimeDataStore> + Sync,
+    <F as async_fn_traits::AsyncFn1<&'a RuntimeDataStore>>::Output: User + 'a,
+    for<'b> <F as async_fn_traits::AsyncFn1<&'b RuntimeDataStore>>::OutputFuture: Send,
+{
+    type Output = <F as async_fn_traits::AsyncFn1<&'a RuntimeDataStore>>::Output;
+
+    async fn build(&self, store: &'a RuntimeDataStore) -> Result<Self::Output, Error> {
+        Ok((self.inner)(store).await)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        data::RuntimeDataStore,
+        user::{AsyncFnBuilder, AsyncUserBuilder},
+        User, UserResult,
+    };
+
+    #[allow(dead_code)]
+    struct BorrowUser<'a> {
+        s: &'a str,
+    }
+
+    #[async_trait::async_trait]
+    impl<'a> User for BorrowUser<'a> {
+        async fn call(&mut self) -> UserResult {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_lifetimes() {
+        let mut store = RuntimeDataStore::default();
+        store.insert("A".to_string());
+
+        async fn user_builder(r: &RuntimeDataStore) -> BorrowUser<'_> {
+            let s: &String = r.get().unwrap();
+            BorrowUser { s: s.as_str() }
+        }
+
+        let a: AsyncFnBuilder<_> = (user_builder).into();
+
+        let _ = futures::executor::block_on(AsyncUserBuilder::build(&a, &store));
     }
 }

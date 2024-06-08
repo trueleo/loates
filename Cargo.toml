@@ -26,6 +26,7 @@ tracing = "0.1.40"
 ratatui = { version = "0.26", optional = true }
 crossterm = { version = "0.26", optional = true }
 macro_rules_attribute = "0.2.0"
+async_fn_traits = "0.1.1"
 
 
 [[example]]
