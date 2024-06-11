@@ -19,7 +19,7 @@ use crate::{
 type ExecutorTask<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 
 pub trait Executor: Send {
-    fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>);
+    fn execute(&mut self, tx: crate::Sender<UserResult>) -> ExecutorTask<'_>;
 }
 
 pub(crate) enum DataExecutor<'ctx, Ub: for<'a> AsyncUserBuilder<'a>> {
@@ -103,15 +103,15 @@ impl<'ctx, Ub> Executor for DataExecutor<'ctx, Ub>
 where
     Ub: for<'a> AsyncUserBuilder<'a>,
 {
-    fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>) {
+    fn execute(&mut self, tx: crate::Sender<UserResult>) -> ExecutorTask<'_> {
         match self {
-            DataExecutor::Once(exec) => exec.execute(),
-            DataExecutor::Constant(exec) => exec.execute(),
-            DataExecutor::Shared(exec) => exec.execute(),
-            DataExecutor::PerUser(exec) => exec.execute(),
-            DataExecutor::RampingUser(exec) => exec.execute(),
-            DataExecutor::ConstantArrivalRate(exec) => exec.execute(),
-            DataExecutor::RampingArrivalRate(exec) => exec.execute(),
+            DataExecutor::Once(exec) => exec.execute(tx),
+            DataExecutor::Constant(exec) => exec.execute(tx),
+            DataExecutor::Shared(exec) => exec.execute(tx),
+            DataExecutor::PerUser(exec) => exec.execute(tx),
+            DataExecutor::RampingUser(exec) => exec.execute(tx),
+            DataExecutor::ConstantArrivalRate(exec) => exec.execute(tx),
+            DataExecutor::RampingArrivalRate(exec) => exec.execute(tx),
         }
     }
 }
@@ -130,8 +130,7 @@ impl<U> Executor for Once<U>
 where
     U: User,
 {
-    fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>) {
-        let (tx, rx) = crate::channel();
+    fn execute(&mut self, tx: crate::Sender<UserResult>) -> ExecutorTask<'_> {
         let task = self.user.call();
         let exec = async move {
             let spawner = async_scoped::spawner::use_tokio::Tokio;
@@ -146,7 +145,7 @@ where
             );
             let _ = scope.collect().await;
         };
-        (Box::pin(exec), rx)
+        Box::pin(exec)
     }
 }
 
@@ -162,9 +161,7 @@ impl<U> Constant<U> {
 }
 
 impl<U: User> Executor for Constant<U> {
-    fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>) {
-        let (tx, rx) = crate::channel();
-
+    fn execute(&mut self, tx: crate::Sender<UserResult>) -> ExecutorTask<'_> {
         let users_len = self.users.len();
         let total_duration_as_secs = self.duration.as_secs();
         let total_duration = self.duration;
@@ -195,7 +192,7 @@ impl<U: User> Executor for Constant<U> {
             let _ = scope.collect().await;
         };
 
-        (Box::pin(task), rx)
+        Box::pin(task)
     }
 }
 
@@ -216,8 +213,7 @@ impl<U: User> SharedIterations<U> {
 }
 
 impl<U: User> SharedIterations<U> {
-    fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>) {
-        let (tx, rx) = crate::channel();
+    fn execute(&mut self, tx: crate::Sender<UserResult>) -> ExecutorTask<'_> {
         let users_len = self.users.len();
         let iterations = self.iterations;
         let total_duration_as_secs = self.duration.as_secs();
@@ -253,7 +249,7 @@ impl<U: User> SharedIterations<U> {
             let _ = scope.collect().await;
         };
 
-        (Box::pin(task), rx)
+        Box::pin(task)
     }
 }
 
@@ -269,8 +265,7 @@ impl<U> PerUserIteration<U> {
 }
 
 impl<U: User> Executor for PerUserIteration<U> {
-    fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>) {
-        let (tx, rx) = crate::channel();
+    fn execute(&mut self, tx: crate::Sender<UserResult>) -> ExecutorTask<'_> {
         let Self { users, iterations } = self;
         let users_len = users.len();
         let iterations = *iterations;
@@ -300,7 +295,7 @@ impl<U: User> Executor for PerUserIteration<U> {
             let _ = scope.collect().await;
         };
 
-        (Box::pin(task), rx)
+        Box::pin(task)
     }
 }
 
@@ -331,8 +326,7 @@ impl<'ctx, Ub> Executor for RampingUser<'ctx, Ub>
 where
     Ub: for<'a> AsyncUserBuilder<'a>,
 {
-    fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>) {
-        let (tx, rx) = crate::channel();
+    fn execute(&mut self, tx: crate::Sender<UserResult>) -> ExecutorTask<'_> {
         let datastore = self.datastore;
         let user_builder = self.user_builder;
         let pre_allocated_users = self.pre_allocate_users;
@@ -378,7 +372,7 @@ where
             }
         };
 
-        (Box::pin(task), rx)
+        Box::pin(task)
     }
 }
 
@@ -412,9 +406,7 @@ impl<'ctx, Ub> Executor for RampingArrivalRate<'ctx, Ub>
 where
     Ub: for<'a> AsyncUserBuilder<'a>,
 {
-    fn execute(&mut self) -> (ExecutorTask<'_>, crate::Receiver<UserResult>) {
-        let (tx, rx) = crate::channel();
-
+    fn execute(&mut self, tx: crate::Sender<UserResult>) -> ExecutorTask<'_> {
         let datastore = self.datastore;
         let user_builder = self.user_builder;
         let pre_allocated_users = self.pre_allocate_users;
@@ -480,7 +472,7 @@ where
             }
         };
 
-        (Box::pin(task), rx)
+        Box::pin(task)
     }
 }
 
@@ -493,6 +485,7 @@ async fn user_call<'a>(
     }
     res
 }
+
 async fn build_users<'a, Ub: AsyncUserBuilder<'a>>(
     store: &'a RuntimeDataStore,
     user_builder: &'a Ub,
