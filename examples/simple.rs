@@ -69,8 +69,9 @@ async fn main() {
     let execution_once = ExecutionPlan::builder()
         .with_user_builder(user_builder)
         .with_data(datastore)
-        .with_executor(Executor::Constant {
-            users: 4,
+        .with_executor(Executor::Shared {
+            users: 2,
+            iterations: 3,
             duration: Duration::from_secs(4),
         });
 
