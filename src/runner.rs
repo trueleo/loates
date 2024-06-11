@@ -35,10 +35,9 @@ impl<'env> Runner<'env> {
         let tui_handle = self.spawn_tui();
 
         let mut runtime_ctx = self.create_contexts();
-        let mut runtime_scenarios = self.runtime_scenario(&mut runtime_ctx).await;
+        let mut scenarios = self.runtime_scenario(&mut runtime_ctx).await;
 
-        for (scenario_index, (scenario_name, scenario)) in runtime_scenarios.iter_mut().enumerate()
-        {
+        for (scenario_index, (scenario_name, scenario)) in scenarios.iter_mut().enumerate() {
             let span = tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_SCENARIO, name = scenario_name.as_ref(), id = scenario_index as u64);
             let _entered = span.enter();
 
@@ -46,7 +45,7 @@ impl<'env> Runner<'env> {
                 unsafe { async_scoped::Scope::create(async_scoped::spawner::use_tokio::Tokio) };
 
             // gather user_results from every executor.
-            let (user_result_tx, mut user_result_rx) = crate::channel();
+            let (user_result_tx, user_result_rx) = crate::channel();
             // close the ubounded_timer
             let (sync_tx, _) = tokio::sync::broadcast::channel::<()>(1);
 
@@ -55,22 +54,12 @@ impl<'env> Runner<'env> {
                 scoped_executor_spawn(span, executor, &mut scope, &sync_tx, user_result_tx.clone());
             }
 
-            let mut terminated_by_user = false;
-            let mut results = Vec::with_capacity(128);
-            while user_result_rx.recv_many(&mut results, 128).await > 0 {
-                if let Some(err) = results.iter().filter_map(|x| x.as_ref().err()).next() {
-                    event!(name: "termination_error", target: CRATE_NAME, tracing::Level::INFO, err = %err);
-                    scope.cancel();
-                    terminated_by_user = true;
-                    break;
-                }
-            }
-
-            if terminated_by_user {
+            if has_user_terminated(user_result_rx).await {
+                scope.cancel();
                 break;
             } else {
-                Scope::collect(&mut scope).await;
                 let _ = sync_tx.send(());
+                Scope::collect(&mut scope).await;
             }
         }
 
@@ -145,24 +134,6 @@ impl<'env> Runner<'env> {
     }
 }
 
-fn scoped_executor_spawn<'s, 'a: 's>(
-    span: Span,
-    exec: &'s mut Box<dyn Executor + 'a>,
-    scope: &mut Scope<'s, (), async_scoped::spawner::use_tokio::Tokio>,
-    sync_tx: &broadcast::Sender<()>,
-    tx: crate::Sender<UserResult>,
-) {
-    let task = exec.execute(tx);
-    scope.spawn_cancellable(
-        async move {
-            task.await;
-        }
-        .instrument(span.clone()),
-        || (),
-    );
-    scope.spawn(unbounded_timer(sync_tx.subscribe()).instrument(span));
-}
-
 pub struct LogicalContext<'env> {
     scenarios: Vec<logical::Scenario<'env>>,
 }
@@ -189,6 +160,37 @@ impl ExecutionRuntimeCtx {
 }
 
 pub struct Config {}
+
+async fn has_user_terminated<'s>(
+    mut user_result_rx: tokio::sync::mpsc::UnboundedReceiver<Result<(), crate::error::Error>>,
+) -> bool {
+    let mut results = Vec::with_capacity(128);
+    while user_result_rx.recv_many(&mut results, 128).await > 0 {
+        if let Some(err) = results.iter().filter_map(|x| x.as_ref().err()).next() {
+            event!(name: "termination_error", target: CRATE_NAME, tracing::Level::INFO, err = %err);
+            return true;
+        }
+    }
+    false
+}
+
+fn scoped_executor_spawn<'s, 'a: 's>(
+    span: Span,
+    exec: &'s mut Box<dyn Executor + 'a>,
+    scope: &mut Scope<'s, (), async_scoped::spawner::use_tokio::Tokio>,
+    sync_tx: &broadcast::Sender<()>,
+    tx: crate::Sender<UserResult>,
+) {
+    let task = exec.execute(tx);
+    scope.spawn_cancellable(
+        async move {
+            task.await;
+        }
+        .instrument(span.clone()),
+        || (),
+    );
+    scope.spawn(unbounded_timer(sync_tx.subscribe()).instrument(span));
+}
 
 // async timer that ticks and sends a duration event.
 // This timer can be stopped using a oneshot channel.
