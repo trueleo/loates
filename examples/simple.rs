@@ -55,7 +55,7 @@ async fn user_builder(runtime: &RuntimeDataStore) -> impl User + '_ {
 
     MyUser {
         client: client.clone(),
-        post_content: content.iter(),
+        post_content: content.iter().cycle(),
     }
 }
 
