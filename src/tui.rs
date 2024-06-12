@@ -481,12 +481,12 @@ fn ui(f: &mut Frame, app: &App) {
         let duration = &current_exec.duration;
         Gauge::default()
             .label(format!("{duration:?}/{total_duration:?}"))
-            .ratio(duration.as_secs_f64() / total_duration.as_secs_f64())
+            .ratio((duration.as_secs_f64() / total_duration.as_secs_f64()).min(1f64))
     } else if let Some(total_iteration) = current_exec.total_iteration {
         let iteration = current_exec.iterations;
         Gauge::default()
             .label(format!("{iteration}/{total_iteration}"))
-            .ratio(iteration as f64 / total_iteration as f64)
+            .ratio((iteration as f64 / total_iteration as f64).min(1f64))
     } else {
         Gauge::default().label("?/???")
     }
