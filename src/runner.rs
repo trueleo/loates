@@ -54,6 +54,7 @@ impl<'env> Runner<'env> {
                 scoped_executor_spawn(span, executor, &mut scope, &sync_tx, user_result_tx.clone());
             }
 
+            drop(user_result_tx);
             if has_user_terminated(user_result_rx).await {
                 scope.cancel();
                 break;
@@ -182,13 +183,7 @@ fn scoped_executor_spawn<'s, 'a: 's>(
     tx: crate::Sender<UserResult>,
 ) {
     let task = exec.execute(tx);
-    scope.spawn_cancellable(
-        async move {
-            task.await;
-        }
-        .instrument(span.clone()),
-        || (),
-    );
+    scope.spawn_cancellable(task.instrument(span.clone()), || ());
     scope.spawn(unbounded_timer(sync_tx.subscribe()).instrument(span));
 }
 
