@@ -38,6 +38,8 @@ where
             return Err(Error::termination(err));
         }
 
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
         Ok(())
     }
 }
@@ -71,7 +73,7 @@ async fn main() {
         .with_data(datastore)
         .with_executor(Executor::Shared {
             users: 2,
-            iterations: 3,
+            iterations: 8,
             duration: Duration::from_secs(4),
         });
 
