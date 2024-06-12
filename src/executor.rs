@@ -219,11 +219,10 @@ impl<U: User> SharedIterations<U> {
         let total_duration_as_secs = self.duration.as_secs();
 
         let end_time = Instant::now() + self.duration;
-
         let task = async move {
             event!(target: CRATE_NAME, Level::INFO, users = users_len, users_max = users_len);
             event!(target: CRATE_NAME, Level::INFO, total_duration = total_duration_as_secs);
-            let iterations_completed = AtomicUsize::new(iterations);
+            let iterations_completed = AtomicUsize::new(0);
             let tasks = self.users.iter_mut().map(|user| {
                 let tx = tx.clone();
                 let iterations_completed = &iterations_completed;
