@@ -31,8 +31,15 @@ impl FromStr for MetricType {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum MetricValue {
+    Counter(u64),
+    Gauge(f64),
+    Histogram(((f64, f64, f64, f64), f64)),
+}
+
 #[derive(Debug)]
-pub enum Metric {
+pub(crate) enum Metric {
     Counter(Counter),
     Gauge(Gauge),
     Histogram(Histogram),
@@ -41,8 +48,8 @@ pub enum Metric {
 impl Metric {
     pub fn new(ty: MetricType) -> Self {
         match ty {
-            MetricType::Counter => Self::Counter(Counter { value: 0 }),
-            MetricType::Gauge => Self::Gauge(Gauge { value: 0. }),
+            MetricType::Counter => Self::Counter(Counter::new()),
+            MetricType::Gauge => Self::Gauge(Gauge::new()),
             MetricType::Histogram => Self::Histogram(Histogram::new()),
         }
     }
@@ -57,6 +64,14 @@ impl Metric {
             _ => {}
         }
     }
+
+    pub fn value(&self) -> MetricValue {
+        match self {
+            Metric::Counter(x) => MetricValue::Counter(x.get()),
+            Metric::Gauge(x) => MetricValue::Gauge(x.get()),
+            Metric::Histogram(x) => MetricValue::Histogram((x.get_percentiles(), x.get_sum())),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -69,10 +84,6 @@ impl Counter {
         Counter {
             value: AtomicU64::new(0),
         }
-    }
-
-    pub(crate) fn inc(&self) {
-        self.value.fetch_add(1, Ordering::Relaxed);
     }
 
     pub(crate) fn add(&self, amount: u64) {
@@ -106,7 +117,7 @@ impl Gauge {
 }
 
 #[derive(Debug)]
-struct Histogram {
+pub(crate) struct Histogram {
     inner: Mutex<(TDigest, Vec<f64>, f64)>,
 }
 
