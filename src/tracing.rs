@@ -118,7 +118,7 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
     ) {
         let Some(span) = ctx.span(id) else { return };
         if span.metadata().target() == USER_TASK {
-            span.extensions_mut().insert(TaskSpanData::new());
+            span.extensions_mut().insert(TaskSpanData::default());
             return;
         }
 
@@ -215,13 +215,16 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
     fn on_close(&self, id: span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
         let end_time = Instant::now();
         let Some(span) = ctx.span(&id) else { return };
-        let mut extention = span.extensions_mut();
+        let extention = span.extensions();
 
-        if let Some(task_inner_span) = extention.get_mut::<TaskSpanData>() {
-            let mut attributes: Vec<_> = span
+        if let Some(task_inner_span) = extention.get::<TaskSpanData>() {
+            let attributes: Vec<_> = span
                 .scope()
                 .take_while(|x| x.metadata().target() == USER_TASK)
                 .map(|x| x.id())
+                .collect();
+            let mut attributes: Vec<_> = attributes
+                .into_iter()
                 .map(|id| {
                     let span = ctx.span(&id).unwrap();
                     let x = span
@@ -256,7 +259,7 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
             return;
         };
 
-        let Some(task_data) = extention.get_mut::<TaskData>() else {
+        let Some(task_data) = extention.get::<TaskData>() else {
             return;
         };
         let _ = self.stats_sender.send(Message::TaskTime {
