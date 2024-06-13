@@ -150,18 +150,12 @@ pub struct TaskSpanData {
     pub attributes: Vec<Attribute>,
 }
 
-impl TaskSpanData {
-    pub fn new() -> Self {
-        Self {
-            start_time: Instant::now(),
-            ..Default::default()
-        }
-    }
-}
-
 impl Default for TaskSpanData {
     fn default() -> Self {
-        Self::new()
+        Self {
+            start_time: Instant::now(),
+            attributes: Vec::default(),
+        }
     }
 }
 
