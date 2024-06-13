@@ -352,5 +352,6 @@ fn handle_crate_execution_event<S: Subscriber + for<'a> LookupSpan<'a>>(
         stage: exec_data.stage,
         stages: exec_data.total_stages,
         stage_duration: exec_data.stage_duration,
+        metrics: exec_data.metrics.entries().collect(),
     })
 }

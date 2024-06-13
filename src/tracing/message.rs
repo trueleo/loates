@@ -1,5 +1,7 @@
 use std::time::{Duration, Instant};
 
+use super::task_event::{metrics::MetricValue, MetricSetKey};
+
 /// Output Message genenerated by this tracing layer
 #[derive(Debug)]
 pub enum Message {
@@ -19,6 +21,10 @@ pub enum Message {
         stage: Option<usize>,
         stage_duration: Option<Duration>,
         stages: Option<usize>,
+        metrics: Vec<(MetricSetKey, MetricValue)>,
+    },
+    Error {
+        err: String,
     },
     TerminatedError {
         err: String,

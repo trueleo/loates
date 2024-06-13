@@ -20,7 +20,7 @@ use ordered_float::OrderedFloat;
 /// Type to capture arbritary spans
 pub mod metrics;
 
-#[derive(Debug, Hash, PartialEq, Eq)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct MetricSetKey {
     name: &'static str,
     metric_type: MetricType,
@@ -42,6 +42,12 @@ impl MetricSet {
             let v = metrics::Metric::new(event.key.metric_type);
             self.inner.insert(event.key, v);
         }
+    }
+
+    pub fn entries(&self) -> impl Iterator<Item = (MetricSetKey, metrics::MetricValue)> + '_ {
+        self.inner
+            .iter()
+            .map(|x| (x.key().clone(), x.value().value()))
     }
 }
 
