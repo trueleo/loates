@@ -19,7 +19,10 @@ use ratatui::{
     TerminalOptions,
 };
 
-use crate::tracing::Message;
+use crate::tracing::{
+    message::Message,
+    task_event::{metrics::MetricValue, MetricSetKey},
+};
 
 const LOGO: &str = "\
 ╔═══╗╔╗ ╔╗╔═══╗╔╗ ╔╗╔═══╗╔═══╗
@@ -42,7 +45,7 @@ enum Event {
     Input(crossterm::event::KeyEvent),
     Tick,
     Resize,
-    Message(crate::tracing::Message),
+    Message(Message),
 }
 
 #[derive(Debug, Default)]
@@ -61,6 +64,7 @@ struct ExecutorState {
     task_min_time: Duration,
     task_max_time: Duration,
     task_total_time: Duration,
+    metrics: Vec<(MetricSetKey, MetricValue)>,
 }
 
 pub struct Scenario {
@@ -130,7 +134,7 @@ impl App {
 impl App {
     pub fn run(
         self,
-        mut tracing_messages: crate::Receiver<crate::tracing::Message>,
+        mut tracing_messages: crate::Receiver<Message>,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         crossterm::terminal::enable_raw_mode()?;
         let stdout = io::stdout();
@@ -200,7 +204,7 @@ fn run_app<B: Backend>(
         events.push(event);
         // consume all events
         rx.try_iter().for_each(|x| events.push(x));
-        for event in &events {
+        for event in events.drain(..) {
             match event {
                 Event::Input(event) => match event.code {
                     KeyCode::Char('c')
@@ -229,29 +233,28 @@ fn run_app<B: Backend>(
                 }
             }
         }
-        events.clear();
     }
     Ok(())
 }
 
 fn handle_message<B: Backend>(
     app: &mut App,
-    message: &Message,
+    message: Message,
     terminal: &mut Terminal<B>,
 ) -> ControlFlow<Result<(), Box<dyn Error + Send + Sync>>, ()> {
     match message {
-        crate::tracing::Message::ScenarioChanged { scenario_id } => {
-            app.current_scenario = *scenario_id;
-            assert_eq!(app.current_scenario().id, *scenario_id)
+        Message::ScenarioChanged { scenario_id } => {
+            app.current_scenario = scenario_id;
+            assert_eq!(app.current_scenario().id, scenario_id)
         }
-        crate::tracing::Message::End => {
+        Message::End => {
             // redraw for the last time
             if let Err(err) = terminal.draw(|f| ui(f, app)) {
                 return ControlFlow::Break(Err(Box::new(err)));
             }
             return ControlFlow::Break(Ok(()));
         }
-        crate::tracing::Message::TerminatedError { err } => {
+        Message::TerminatedError { err } => {
             let mut text = Text::from(err.as_str());
             if let Some(line) = text.lines.first_mut() {
                 line.spans
@@ -269,21 +272,26 @@ fn handle_message<B: Backend>(
 
             return ControlFlow::Break(Ok(()));
         }
-
-        crate::tracing::Message::TaskTime {
+        Message::Error { err } => {
+            let text = Text::from(err.to_string());
+            // redraw for the last time
+            let _ = terminal.insert_before(text.height() as u16, |buf| {
+                Paragraph::new(text).render(buf.area, buf);
+            });
+        }
+        Message::TaskTime {
             execution_id: id,
             start_time,
             end_time,
-            events,
             ..
         } => {
             if let Some(exec) = app
                 .current_scenario_mut()
                 .execs
                 .iter_mut()
-                .find(|x| x.id == *id)
+                .find(|x| x.id == id)
             {
-                let duration = end_time.saturating_duration_since(*start_time);
+                let duration = end_time.saturating_duration_since(start_time);
                 exec.iterations += 1;
                 exec.task_max_time = exec.task_max_time.max(duration);
                 if exec.task_min_time == Duration::ZERO {
@@ -293,20 +301,8 @@ fn handle_message<B: Backend>(
                 }
                 exec.task_total_time += duration;
             }
-
-            for err in events
-                .iter()
-                .filter(|x| x.name == "error")
-                .flat_map(|x| x.values.iter().filter(|x| x.0 == "err").map(|(_, v)| v))
-            {
-                let text = Text::from(err.to_string());
-                // redraw for the last time
-                let _ = terminal.insert_before(text.height() as u16, |buf| {
-                    Paragraph::new(text).render(buf.area, buf);
-                });
-            }
         }
-        crate::tracing::Message::ExecutorUpdate {
+        Message::ExecutorUpdate {
             id,
             users,
             max_users,
@@ -316,21 +312,23 @@ fn handle_message<B: Backend>(
             stage,
             stages,
             stage_duration,
+            metrics,
         } => {
             if let Some(exec) = app
                 .current_scenario_mut()
                 .execs
                 .iter_mut()
-                .find(|x| x.id == *id)
+                .find(|x| x.id == id)
             {
-                exec.users = *users;
-                exec.max_users = *max_users;
-                exec.duration = *duration;
-                exec.total_duration = *total_duration;
-                exec.total_iteration = *total_iteration;
-                exec.stage = *stage;
-                exec.stages = *stages;
-                exec.stage_duration = *stage_duration
+                exec.users = users;
+                exec.max_users = max_users;
+                exec.duration = duration;
+                exec.total_duration = total_duration;
+                exec.total_iteration = total_iteration;
+                exec.stage = stage;
+                exec.stages = stages;
+                exec.stage_duration = stage_duration;
+                exec.metrics = metrics;
             }
         }
     };
