@@ -9,13 +9,16 @@ edition = "2021"
 tui = ["dep:ratatui", "dep:crossterm"]
 
 [dependencies]
+atomic = "0.6.0"
 anyhow = "1.0"
 async-trait = "0.1"
 async-stream = "0.3"
+dashmap = "5.5.3"
 futures = { version = "0.3", features = ["std"] }
 thiserror = "1.0"
 async-scoped = { version = "0.9", features = ["use-tokio"] }
 tokio = { version = "1.35", features = ["rt", "macros", "time"] }
+ordered-float = "4.2.0"
 tokio-stream = "0.1"
 tracing-subscriber = { version = "0.3", features = [
     "fmt",
@@ -23,11 +26,11 @@ tracing-subscriber = { version = "0.3", features = [
     "registry",
 ] }
 tracing = "0.1.40"
+tdigest = "0.2.3"
 ratatui = { version = "0.26", optional = true }
 crossterm = { version = "0.26", optional = true }
 macro_rules_attribute = "0.2.0"
 async_fn_traits = "0.1.1"
-
 
 [[example]]
 name = "simple"
