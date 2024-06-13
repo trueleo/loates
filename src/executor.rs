@@ -13,7 +13,7 @@ use crate::{
     error::Error,
     logical::{self, Rate},
     user::AsyncUserBuilder,
-    User, UserResult, CRATE_NAME, SPAN_TASK, TARGET_USER_EVENT,
+    User, UserResult, CRATE_NAME, SPAN_TASK, USER_TASK,
 };
 
 type ExecutorTask<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
@@ -480,7 +480,7 @@ async fn user_call<'a>(
 ) -> Result<(), crate::error::Error> {
     let res = task.await;
     if let Err(ref err) = res {
-        event!(name: "error", target: TARGET_USER_EVENT, Level::INFO, err = %err)
+        event!(name: "error", target: USER_TASK, Level::INFO, err = %err)
     }
     res
 }
