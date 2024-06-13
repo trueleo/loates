@@ -193,6 +193,12 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
                         .send(Message::TerminatedError { err: err.err });
                     return;
                 }
+                "error" => {
+                    let mut err = ErrorVisitor::default();
+                    event.record(&mut err);
+                    let _ = self.stats_sender.send(Message::Error { err: err.err });
+                    return;
+                }
                 _ => (),
             }
         }
@@ -322,7 +328,7 @@ fn handle_crate_execution_event<S: Subscriber + for<'a> LookupSpan<'a>>(
     event: &tracing::Event,
     ctx: &tracing_subscriber::layer::Context<S>,
 ) -> ControlFlow<(), Message> {
-    if event.metadata().target() != "rusher" {
+    if event.metadata().target() != CRATE_NAME {
         return ControlFlow::Break(());
     }
     let Some(parent) = ctx.current_span().id().and_then(|id| ctx.span(id)) else {
