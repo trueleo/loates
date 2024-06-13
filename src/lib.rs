@@ -22,7 +22,7 @@ pub use tokio::sync::mpsc::UnboundedReceiver as Receiver;
 pub use tokio::sync::mpsc::UnboundedSender as Sender;
 
 const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
-const USER_TASK: &str = "user_event";
+pub const USER_TASK: &str = "user_event";
 const SPAN_TASK: &str = "task";
 const SPAN_EXEC: &str = "execution";
 const SPAN_SCENARIO: &str = "scenario";

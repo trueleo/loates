@@ -34,12 +34,13 @@ pub struct MetricSet {
 
 impl MetricSet {
     pub fn update(&self, event: TaskEvent) {
-        let metric = self.inner.get_mut(&event.key);
+        let metric = self.inner.get(&event.key);
 
         if let Some(metric) = metric {
             metric.update(event.value, event.key.metric_type);
         } else {
             let v = metrics::Metric::new(event.key.metric_type);
+            v.update(event.value, event.key.metric_type);
             self.inner.insert(event.key, v);
         }
     }

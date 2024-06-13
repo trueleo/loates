@@ -207,7 +207,9 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
             let _ = self.stats_sender.send(exec_update);
             return;
         }
-        if let ControlFlow::Continue(()) = handle_user_event(event, &ctx) {}
+        if let ControlFlow::Continue(update) = handle_user_event(event, &ctx) {
+            let _ = self.stats_sender.send(update);
+        }
     }
 
     fn on_close(&self, id: span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
@@ -269,7 +271,7 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
 fn handle_user_event<S: Subscriber + for<'a> LookupSpan<'a>>(
     event: &tracing::Event,
     ctx: &tracing_subscriber::layer::Context<S>,
-) -> ControlFlow<()> {
+) -> ControlFlow<(), Message> {
     if event.metadata().target() != USER_TASK {
         return ControlFlow::Break(());
     }
@@ -314,14 +316,11 @@ fn handle_user_event<S: Subscriber + for<'a> LookupSpan<'a>>(
     );
     event.record(&mut task_event);
 
-    exec_span
-        .extensions()
-        .get::<ExecutionData>()
-        .unwrap()
-        .metrics
-        .update(task_event);
+    let data = exec_span.extensions();
+    let data = data.get::<ExecutionData>().unwrap();
+    data.metrics.update(task_event);
 
-    ControlFlow::Continue(())
+    ControlFlow::Continue(Message::from(data))
 }
 
 fn handle_crate_execution_event<S: Subscriber + for<'a> LookupSpan<'a>>(
@@ -342,16 +341,22 @@ fn handle_crate_execution_event<S: Subscriber + for<'a> LookupSpan<'a>>(
         return ControlFlow::Break(());
     };
     event.record(exec_data);
-    ControlFlow::Continue(Message::ExecutorUpdate {
-        id: exec_data.id,
-        users: exec_data.users,
-        max_users: exec_data.max_users,
-        total_iteration: exec_data.total_iteration,
-        duration: exec_data.duration,
-        total_duration: exec_data.total_duration,
-        stage: exec_data.stage,
-        stages: exec_data.total_stages,
-        stage_duration: exec_data.stage_duration,
-        metrics: exec_data.metrics.entries().collect(),
-    })
+    ControlFlow::Continue(Message::from(&*exec_data))
+}
+
+impl From<&ExecutionData> for Message {
+    fn from(value: &ExecutionData) -> Self {
+        Message::ExecutorUpdate {
+            id: value.id,
+            users: value.users,
+            max_users: value.max_users,
+            total_iteration: value.total_iteration,
+            duration: value.duration,
+            total_duration: value.total_duration,
+            stage: value.stage,
+            stages: value.total_stages,
+            stage_duration: value.stage_duration,
+            metrics: value.metrics.entries().collect(),
+        }
+    }
 }
