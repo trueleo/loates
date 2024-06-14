@@ -94,16 +94,17 @@ impl RequestBuilder {
         let path = request.url().path();
         let method = request.method();
         let span = span!(target: USER_TASK, Level::INFO, "reqwest", url = field::Empty, %path, %method, status = field::Empty);
+        let _t = span.enter();
         if let Some(host) = host {
             span.record("url", field::display(host));
         }
         use http_body::Body as _;
         if let Some(size) = request.body().and_then(|x| x.size_hint().exact()) {
-            event!(name: "sent.gauge", target: USER_TASK, Level::INFO, value = size);
+            event!(name: "sent.gauge", target: USER_TASK, Level::INFO, value = size as f64);
         }
         let resp = client.execute(request).await?;
         if let Some(size) = resp.content_length() {
-            event!(name: "receive.gauge", target: USER_TASK, Level::INFO, value = size);
+            event!(name: "receive.gauge", target: USER_TASK, Level::INFO, value = size as f64);
         }
         span.record("status", field::display(resp.status().as_u16()));
         Ok(resp)

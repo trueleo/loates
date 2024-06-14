@@ -106,7 +106,11 @@ impl TaskEvent {
 }
 
 impl tracing::field::Visit for TaskEvent {
-    fn record_debug(&mut self, _: &tracing::field::Field, _: &dyn std::fmt::Debug) {}
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        self.key
+            .attributes
+            .push((field.name(), Value::String(format!("{:?}", value))))
+    }
 
     fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
         self.key
@@ -160,7 +164,10 @@ impl Default for TaskSpanData {
 }
 
 impl tracing::field::Visit for TaskSpanData {
-    fn record_debug(&mut self, _: &tracing::field::Field, _: &dyn std::fmt::Debug) {}
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        self.attributes
+            .push((field.name(), Value::String(format!("{:?}", value))));
+    }
 
     fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
         self.attributes
