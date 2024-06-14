@@ -147,6 +147,17 @@ impl tracing::field::Visit for TaskEvent {
                 .push((field.name(), Value::Float(OrderedFloat(value)))),
         }
     }
+
+    // Captures duration in u64 range
+    fn record_u128(&mut self, field: &tracing::field::Field, value: u128) {
+        match field.name() {
+            "value" => self.value = Value::Duration(Duration::from_nanos(value as u64)),
+            _ => self.key.attributes.push((
+                field.name(),
+                Value::Duration(Duration::from_nanos(value as u64)),
+            )),
+        }
+    }
 }
 
 pub struct TaskSpanData {
@@ -186,5 +197,12 @@ impl tracing::field::Visit for TaskSpanData {
     fn record_f64(&mut self, field: &tracing::field::Field, value: f64) {
         self.attributes
             .push((field.name(), Value::Float(OrderedFloat(value))))
+    }
+    // Captures duration in u64 range
+    fn record_u128(&mut self, field: &tracing::field::Field, value: u128) {
+        self.attributes.push((
+            field.name(),
+            Value::Duration(Duration::from_nanos(value as u64)),
+        ));
     }
 }
