@@ -262,7 +262,7 @@ fn render_gauge<'a>(
             max.to_string().into(),
         ]);
 
-    let mut title = format!("{}_{:?}{{", key.name, key.metric_type.to_string());
+    let mut title = format!("{}_{}{{", key.name, key.metric_type.to_string());
     for attr in &key.attributes {
         title.push_str(&format!("{}={}", attr.0, attr.1));
         title.push(' ');
@@ -277,7 +277,7 @@ fn render_gauge<'a>(
     f.render_widget(chart, area)
 }
 
-fn render_histogram(
+fn render_histogram<'a>(
     key: &MetricSetKey,
     value: impl Iterator<Item = &'a MetricValue>,
     f: &mut Frame,
@@ -287,16 +287,33 @@ fn render_histogram(
     let MetricValue::Histogram(((p50, p90, p95, p99), sum)) = value else {
         unreachable!()
     };
-    let data = [("p50", p50), ("p90", p90), ("p95", p95), ("p99", p99)];
+
+    fn norm(x: f64, max: f64) -> u64 {
+        let x_norm = (x / max) * 100.;
+        if x_norm.is_nan() {
+            return 0;
+        }
+        let x_norm: u64 = unsafe { x_norm.to_int_unchecked() };
+        x_norm
+    }
+
+    let data = [
+        ("p50", norm(*p50, *p99)),
+        ("p90", norm(*p90, *p99)),
+        ("p95", norm(*p95, *p99)),
+        ("p99", norm(*p99, *p99)),
+    ];
+
     let barchart = BarChart::default()
         .block(Block::bordered().title("BarChart"))
         .bar_width(1)
         .bar_style(Style::new().yellow().on_red())
         .value_style(Style::new().red().bold())
         .label_style(Style::new().white())
-        .data(&[data])
-        .data(BarGroup::default().bars(&[Bar::default().value(10), Bar::default().value(20)]))
-        .max(4);
+        .data(&data)
+        .max(100);
+
+    f.render_widget(barchart, area)
 }
 
 fn render_metrics<'a>(
@@ -306,8 +323,10 @@ fn render_metrics<'a>(
 ) {
     let layout = Layout::vertical((0..metrics.len()).map(|_| Constraint::Length(10))).split(rect);
     for (metric, rect) in metrics.zip(layout.iter()) {
-        if metric.0.metric_type == MetricType::Gauge {
-            render_gauge(metric.0, metric.1.iter(), f, *rect)
+        match metric.0.metric_type {
+            MetricType::Gauge => render_gauge(metric.0, metric.1.iter(), f, *rect),
+            MetricType::Histogram => render_histogram(metric.0, metric.1.iter(), f, *rect),
+            _ => todo!(),
         }
     }
 }

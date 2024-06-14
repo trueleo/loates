@@ -58,7 +58,7 @@ async fn main() {
         .with_user_builder(user_builder)
         .with_executor(Executor::PerUser {
             users: 1,
-            iterations: 3,
+            iterations: 8,
         });
 
     let scenario = Scenario::new("scene1".to_string(), execution);
