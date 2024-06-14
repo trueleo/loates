@@ -22,9 +22,9 @@ pub mod metrics;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct MetricSetKey {
-    name: &'static str,
-    metric_type: MetricType,
-    attributes: Vec<Attribute>,
+    pub name: &'static str,
+    pub metric_type: MetricType,
+    pub attributes: Vec<Attribute>,
 }
 
 #[derive(Debug, Default)]

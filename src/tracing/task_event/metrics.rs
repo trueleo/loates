@@ -18,6 +18,17 @@ pub enum MetricType {
     Histogram,
 }
 
+#[allow(clippy::to_string_trait_impl)]
+impl ToString for MetricType {
+    fn to_string(&self) -> String {
+        match self {
+            MetricType::Counter => "counter".to_string(),
+            MetricType::Gauge => "gauge".to_string(),
+            MetricType::Histogram => "histogram".to_string(),
+        }
+    }
+}
+
 impl FromStr for MetricType {
     type Err = ();
 
@@ -35,6 +46,7 @@ impl FromStr for MetricType {
 pub enum MetricValue {
     Counter(u64),
     Gauge(f64),
+    /// histogram values ((p50, p90, p95, p99), sum)
     Histogram(((f64, f64, f64, f64), f64)),
 }
 
