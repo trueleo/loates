@@ -88,19 +88,19 @@ impl tracing::field::Visit for ScenarioData {
 }
 
 // Tracing layer that tracks and generates message based on this crate's tracing events
-pub struct TraceHttp {
+pub struct TracerLayer {
     // current_scenario: Mutex<String>,
     stats_sender: crate::Sender<Message>,
 }
 
-impl TraceHttp {
+impl TracerLayer {
     pub fn new() -> (Self, crate::Receiver<Message>) {
         let (tx, rx) = crate::channel();
         (Self { stats_sender: tx }, rx)
     }
 }
 
-impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
+impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TracerLayer {
     fn enabled(
         &self,
         metadata: &tracing::Metadata<'_>,
@@ -118,7 +118,9 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceHttp {
     ) {
         let Some(span) = ctx.span(id) else { return };
         if span.metadata().target() == USER_TASK {
-            span.extensions_mut().insert(TaskSpanData::default());
+            let mut val = TaskSpanData::default();
+            attr.record(&mut val);
+            span.extensions_mut().insert(val);
             return;
         }
 

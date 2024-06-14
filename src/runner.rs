@@ -122,7 +122,7 @@ impl<'env> Runner<'env> {
             return None;
         }
 
-        let (tracer, rx_tracer) = crate::tracing::TraceHttp::new();
+        let (tracer, rx_tracer) = crate::tracing::TracerLayer::new();
         let subscriber = tracing_subscriber::layer::SubscriberExt::with(
             tracing_subscriber::Registry::default(),
             tracer,
