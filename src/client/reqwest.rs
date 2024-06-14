@@ -102,7 +102,9 @@ impl RequestBuilder {
         if let Some(size) = request.body().and_then(|x| x.size_hint().exact()) {
             event!(name: "sent.gauge", target: USER_TASK, Level::INFO, value = size as f64);
         }
+        drop(_t);
         let resp = client.execute(request).await?;
+        let _t = span.enter();
         if let Some(size) = resp.content_length() {
             event!(name: "receive.gauge", target: USER_TASK, Level::INFO, value = size as f64);
         }
