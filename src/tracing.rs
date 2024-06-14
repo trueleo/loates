@@ -214,6 +214,22 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TracerLayer {
         }
     }
 
+    fn on_record(
+        &self,
+        span: &span::Id,
+        values: &span::Record<'_>,
+        ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        let Some(span) = ctx.span(span) else {
+            return;
+        };
+        let mut span_data = span.extensions_mut();
+        let Some(span_data) = span_data.get_mut::<TaskSpanData>() else {
+            return;
+        };
+        values.record(span_data);
+    }
+
     fn on_close(&self, id: span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
         let end_time = Instant::now();
         let Some(span) = ctx.span(&id) else { return };
