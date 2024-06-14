@@ -82,9 +82,7 @@ impl Metric {
         match self {
             Metric::Counter(x) => MetricValue::Counter(x.get()),
             Metric::Gauge(x) => MetricValue::Gauge(x.get()),
-            Metric::Histogram(x) => {
-                MetricValue::Histogram((dbg!(x.get_percentiles()), x.get_sum()))
-            }
+            Metric::Histogram(x) => MetricValue::Histogram((x.get_percentiles(), x.get_sum())),
         }
     }
 }
@@ -165,7 +163,7 @@ impl Histogram {
             let quantile = u as f64 / l as f64;
             tdigest.estimate_quantile(quantile)
         } else {
-            let index = dbg!((dbg!(lock.1.len()) * u) / l);
+            let index = (lock.1.len() * u) / l;
             lock.1[index]
         }
     }
