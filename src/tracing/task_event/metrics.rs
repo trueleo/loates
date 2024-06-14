@@ -4,6 +4,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Mutex,
     },
+    time::Duration,
 };
 
 use atomic::Atomic;
@@ -16,6 +17,7 @@ pub enum MetricType {
     Counter,
     Gauge,
     Histogram,
+    Duration,
 }
 
 #[allow(clippy::to_string_trait_impl)]
@@ -25,6 +27,7 @@ impl ToString for MetricType {
             MetricType::Counter => "counter".to_string(),
             MetricType::Gauge => "gauge".to_string(),
             MetricType::Histogram => "histogram".to_string(),
+            MetricType::Duration => "duration".to_string(),
         }
     }
 }
@@ -37,6 +40,7 @@ impl FromStr for MetricType {
             "counter" => Ok(Self::Counter),
             "gauge" => Ok(Self::Gauge),
             "histogram" => Ok(Self::Histogram),
+            "duration" => Ok(Self::Duration),
             _ => Err(()),
         }
     }
@@ -48,6 +52,7 @@ pub enum MetricValue {
     Gauge(f64),
     /// histogram values ((p50, p90, p95, p99), sum)
     Histogram(((f64, f64, f64, f64), f64)),
+    Duration(((Duration, Duration, Duration, Duration), Duration)),
 }
 
 #[derive(Debug)]
@@ -55,6 +60,7 @@ pub(crate) enum Metric {
     Counter(Counter),
     Gauge(Gauge),
     Histogram(Histogram),
+    Duration(Histogram),
 }
 
 impl Metric {
@@ -63,6 +69,7 @@ impl Metric {
             MetricType::Counter => Self::Counter(Counter::new()),
             MetricType::Gauge => Self::Gauge(Gauge::new()),
             MetricType::Histogram => Self::Histogram(Histogram::new()),
+            MetricType::Duration => Self::Duration(Histogram::new()),
         }
     }
 
@@ -70,10 +77,12 @@ impl Metric {
         match (self, metric_type, value) {
             (Metric::Counter(x), MetricType::Counter, Value::UnsignedNumber(val)) => x.add(val),
             (Metric::Gauge(x), MetricType::Gauge, Value::Float(f)) => x.set(f.0),
-            (Metric::Histogram(x), MetricType::Histogram, Value::Duration(f)) => {
+            (Metric::Histogram(x), MetricType::Histogram, Value::Float(val)) => x.observe(val.0),
+            (Metric::Duration(x), MetricType::Duration, Value::Duration(f)) => {
                 let val = f.as_nanos() as u64;
                 x.observe(val as f64)
             }
+            (Metric::Duration(x), MetricType::Duration, Value::Float(f)) => x.observe(f.0),
             _ => {}
         }
     }
@@ -83,6 +92,20 @@ impl Metric {
             Metric::Counter(x) => MetricValue::Counter(x.get()),
             Metric::Gauge(x) => MetricValue::Gauge(x.get()),
             Metric::Histogram(x) => MetricValue::Histogram((x.get_percentiles(), x.get_sum())),
+            Metric::Duration(x) => {
+                let f = |f: f64| -> u64 {
+                    if f.is_nan() {
+                        return 0;
+                    }
+                    unsafe { f.to_int_unchecked() }
+                };
+                let (p50, p90, p95, p99) = x.get_percentiles();
+                let p50 = Duration::from_nanos(f(p50));
+                let p90 = Duration::from_nanos(f(p90));
+                let p95 = Duration::from_nanos(f(p95));
+                let p99 = Duration::from_nanos(f(p99));
+                MetricValue::Duration(((p50, p90, p95, p99), Duration::from_nanos(f(x.get_sum()))))
+            }
         }
     }
 }

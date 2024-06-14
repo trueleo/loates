@@ -1,12 +1,14 @@
-use std::collections::VecDeque;
+use std::{collections::VecDeque, time::Duration};
 
 use ordered_float::OrderedFloat;
 use ratatui::{
-    layout::{Constraint, Flex, Layout, Rect},
+    layout::{Constraint, Direction, Flex, Layout, Rect},
     style::{Color, Style, Stylize},
     symbols,
     text::{Line, Span, Text},
-    widgets::{Axis, BarChart, Block, Borders, Chart, Dataset, Gauge, GraphType, Paragraph},
+    widgets::{
+        Axis, Bar, BarChart, BarGroup, Block, Borders, Chart, Dataset, Gauge, GraphType, Paragraph,
+    },
     Frame,
 };
 
@@ -297,20 +299,69 @@ fn render_histogram<'a>(
         x_norm
     }
 
-    let data = [
-        ("p50", norm(*p50, *p99)),
-        ("p90", norm(*p90, *p99)),
-        ("p95", norm(*p95, *p99)),
-        ("p99", norm(*p99, *p99)),
-    ];
+    let bar = |name: &'static str, value: &f64, max: &f64| -> Bar<'_> {
+        let norm = norm(*value, *max);
+        Bar::default()
+            .value(norm)
+            .text_value(value.to_string())
+            .label(name.into())
+    };
+
+    let data = BarGroup::default().bars(&[
+        bar("p50", p50, p99),
+        bar("p90", p90, p99),
+        bar("p95", p95, p99),
+        bar("p99", p99, p99),
+    ]);
 
     let barchart = BarChart::default()
-        .block(Block::bordered().title("BarChart"))
+        .direction(Direction::Horizontal)
         .bar_width(1)
-        .bar_style(Style::new().yellow().on_red())
-        .value_style(Style::new().red().bold())
-        .label_style(Style::new().white())
-        .data(&data)
+        .bar_gap(0)
+        .bar_style(Style::new().green().on_black())
+        .data(data)
+        .max(100);
+
+    f.render_widget(barchart, area)
+}
+
+fn render_duration_histogram<'a>(
+    key: &MetricSetKey,
+    value: impl Iterator<Item = &'a MetricValue>,
+    f: &mut Frame,
+    area: Rect,
+) {
+    let value = value.last().unwrap();
+    let MetricValue::Duration(((p50, p90, p95, p99), sum)) = value else {
+        unreachable!()
+    };
+
+    fn norm(x: &Duration, max: &Duration) -> u64 {
+        let x_norm = x.as_nanos().checked_div(max.as_nanos()).unwrap_or(0) * 100;
+        x_norm as u64
+    }
+
+    let bar = |name: &'static str, value: &Duration, max: &Duration| -> Bar<'_> {
+        let norm = norm(value, max);
+        Bar::default()
+            .value(norm)
+            .text_value(format!("{:.2?}", value))
+            .label(name.into())
+    };
+
+    let data = BarGroup::default().bars(&[
+        bar("p50", p50, p99),
+        bar("p90", p90, p99),
+        bar("p95", p95, p99),
+        bar("p99", p99, p99),
+    ]);
+
+    let barchart = BarChart::default()
+        .direction(Direction::Horizontal)
+        .bar_width(1)
+        .bar_gap(0)
+        .bar_style(Style::new().green().on_black())
+        .data(data)
         .max(100);
 
     f.render_widget(barchart, area)
@@ -326,6 +377,7 @@ fn render_metrics<'a>(
         match metric.0.metric_type {
             MetricType::Gauge => render_gauge(metric.0, metric.1.iter(), f, *rect),
             MetricType::Histogram => render_histogram(metric.0, metric.1.iter(), f, *rect),
+            MetricType::Duration => render_duration_histogram(metric.0, metric.1.iter(), f, *rect),
             _ => todo!(),
         }
     }

@@ -258,7 +258,7 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TracerLayer {
             attributes.reverse();
             let event = TaskEvent::new(
                 span.name(),
-                MetricType::Histogram,
+                MetricType::Duration,
                 attributes.into_iter().flatten().collect(),
                 task_inner_span.start_time.elapsed().into(),
             );
