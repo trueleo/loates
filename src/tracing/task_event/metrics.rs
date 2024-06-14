@@ -71,7 +71,8 @@ impl Metric {
             (Metric::Counter(x), MetricType::Counter, Value::UnsignedNumber(val)) => x.add(val),
             (Metric::Gauge(x), MetricType::Gauge, Value::Float(f)) => x.set(f.0),
             (Metric::Histogram(x), MetricType::Histogram, Value::Duration(f)) => {
-                x.observe(f.as_secs_f64())
+                let val = f.as_nanos() as u64;
+                x.observe(val as f64)
             }
             _ => {}
         }
@@ -81,7 +82,9 @@ impl Metric {
         match self {
             Metric::Counter(x) => MetricValue::Counter(x.get()),
             Metric::Gauge(x) => MetricValue::Gauge(x.get()),
-            Metric::Histogram(x) => MetricValue::Histogram((x.get_percentiles(), x.get_sum())),
+            Metric::Histogram(x) => {
+                MetricValue::Histogram((dbg!(x.get_percentiles()), x.get_sum()))
+            }
         }
     }
 }
@@ -130,13 +133,13 @@ impl Gauge {
 
 #[derive(Debug)]
 pub(crate) struct Histogram {
-    inner: Mutex<(TDigest, Vec<f64>, f64)>,
+    inner: Mutex<(Option<TDigest>, Vec<f64>, f64)>,
 }
 
 impl Histogram {
     fn new() -> Self {
         Self {
-            inner: Mutex::new((TDigest::new_with_size(100), Vec::default(), 0.)),
+            inner: Mutex::new((None, Vec::default(), 0.)),
         }
     }
 
@@ -145,25 +148,34 @@ impl Histogram {
         inner.1.push(value);
         if inner.1.len() >= 4096 {
             let values = std::mem::take(&mut inner.1);
-            inner.0.merge_unsorted(values);
+            if let Some(tdigest) = inner.0.as_mut() {
+                tdigest.merge_unsorted(values);
+            } else {
+                let tdigest = TDigest::default();
+                tdigest.merge_unsorted(values);
+                inner.0 = Some(tdigest)
+            }
         }
         inner.2 += value;
     }
 
-    fn get_percentile(&self, percentile: f64) -> f64 {
-        self.inner
-            .lock()
-            .unwrap()
-            .0
-            .estimate_quantile(percentile / 100.0)
+    fn get_percentile(&self, u: usize, l: usize) -> f64 {
+        let lock = self.inner.lock().unwrap();
+        if let Some(tdigest) = &lock.0 {
+            let quantile = u as f64 / l as f64;
+            tdigest.estimate_quantile(quantile)
+        } else {
+            let index = dbg!((dbg!(lock.1.len()) * u) / l);
+            lock.1[index]
+        }
     }
 
     fn get_percentiles(&self) -> (f64, f64, f64, f64) {
         (
-            self.get_percentile(50.0),
-            self.get_percentile(90.0),
-            self.get_percentile(95.0),
-            self.get_percentile(99.0),
+            self.get_percentile(1, 2),
+            self.get_percentile(9, 10),
+            self.get_percentile(95, 100),
+            self.get_percentile(99, 100),
         )
     }
 
