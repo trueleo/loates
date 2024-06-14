@@ -5,9 +5,8 @@ use rusher::error::Error;
 use rusher::logical::{ExecutionPlan, Executor, Scenario};
 use rusher::runner::Runner;
 use rusher::tracing::message::Message;
-use rusher::tracing::TraceHttp;
-use rusher::{User, USER_TASK};
-use tracing::{event, Level};
+use rusher::tracing::TracerLayer;
+use rusher::User;
 // use tracing_subscriber::fmt::format::{format, FmtSpan};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Registry;
@@ -17,9 +16,26 @@ struct MyUser {}
 #[async_trait::async_trait]
 impl User for MyUser {
     async fn call(&mut self) -> Result<(), Error> {
-        event!(name: "event.counter", target: USER_TASK, Level::INFO, value = 1u64);
-        // event!(name: "event.counter", target: USER_TASK, Level::INFO, value = 2u64);
-        // tokio::time::sleep(Duration::from_millis(1)).await;
+        // In each iteration get the next string
+        let res = rusher::client::reqwest::Client::new()
+            .post("https://httpbin.org/anything")
+            .body("abc")
+            .send()
+            .await
+            .map_err(|err| Error::GenericError(err.into()))?;
+
+        if !res.status().is_success() {
+            let body = res
+                .bytes()
+                .await
+                .map_err(|err| Error::TerminationError(err.into()))?;
+
+            let err = String::from_utf8_lossy(&body).to_string();
+            return Err(Error::termination(err));
+        }
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
         Ok(())
     }
 }
@@ -35,28 +51,38 @@ async fn main() {
     //     .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
     //     .init();
 
-    let (tracer, mut rx) = TraceHttp::new();
+    let (tracer, mut rx) = TracerLayer::new();
     tracing::subscriber::set_global_default(Registry::default().with(tracer)).unwrap();
 
     let execution = ExecutionPlan::builder()
         .with_user_builder(user_builder)
-        .with_executor(Executor::Constant {
-            users: 4,
-            duration: Duration::from_secs(1),
+        .with_executor(Executor::PerUser {
+            users: 1,
+            iterations: 3,
         });
+
     let scenario = Scenario::new("scene1".to_string(), execution);
     let scenarios = vec![scenario];
 
+    // let handler = tokio::spawn(async move {
+    //     let mut counter = 0usize;
+    //     let mut vec = Vec::with_capacity(6000);
+    //     loop {
+    //         counter += rx.recv_many(&mut vec, 6000).await;
+    //         println!("{:?}", counter);
+    //         if vec.iter().any(|val| matches!(val, Message::End)) {
+    //             break;
+    //         }
+    //         vec.clear()
+    //     }
+    // });
+
     let handler = tokio::spawn(async move {
-        let mut counter = 0usize;
-        let mut vec = Vec::with_capacity(6000);
-        loop {
-            counter += rx.recv_many(&mut vec, 6000).await;
-            println!("{:?}", counter);
-            if vec.iter().any(|val| matches!(val, Message::End)) {
+        while let Some(val) = rx.recv().await {
+            println!("{:?}", val);
+            if matches!(val, Message::End) {
                 break;
             }
-            vec.clear()
         }
     });
 

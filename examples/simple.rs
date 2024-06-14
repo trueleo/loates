@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use reqwest::Client;
+use rusher::client::reqwest::Client;
 use rusher::data::RuntimeDataStore;
 use rusher::error::Error;
 use rusher::logical::{ExecutionPlan, Executor, Scenario};

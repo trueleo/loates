@@ -7,6 +7,7 @@ edition = "2021"
 
 [features]
 tui = ["dep:ratatui", "dep:crossterm"]
+reqwest = ["dep:reqwest"]
 
 [dependencies]
 atomic = "0.6.0"
@@ -31,11 +32,18 @@ ratatui = { version = "0.26", optional = true }
 crossterm = { version = "0.26", optional = true }
 macro_rules_attribute = "0.2.0"
 async_fn_traits = "0.1.1"
+http-body = "1.0.0"
+
+[dependencies.reqwest]
+version = "0.12"
+default-features = false
+features = ["http2", "rustls-tls", "charset", "stream", "multipart"]
+optional = true
 
 [[example]]
 name = "simple"
 path = "./examples/simple.rs"
-required-features = ["tui"]
+required-features = ["tui", "reqwest"]
 
 [dev-dependencies.reqwest]
 version = "0.12"

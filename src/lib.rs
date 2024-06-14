@@ -1,3 +1,5 @@
+#[cfg(feature = "reqwest")]
+pub mod client;
 pub mod config;
 pub mod data;
 pub mod error;
