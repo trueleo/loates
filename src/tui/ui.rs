@@ -2,13 +2,13 @@ use std::{collections::VecDeque, time::Duration};
 
 use ordered_float::OrderedFloat;
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Flex, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Flex, Layout, Margin, Rect},
     style::{Color, Style, Stylize},
     symbols,
     text::{Line, Span, Text},
     widgets::{
         block::Title, Axis, Bar, BarChart, BarGroup, Block, Borders, Chart, Dataset, Gauge,
-        GraphType, Paragraph,
+        GraphType, Padding, Paragraph,
     },
     Frame,
 };
@@ -274,19 +274,12 @@ fn render_gauge<'a>(
             format!("{:.1}", max).into(),
         ]);
 
-    let mut title: Title = Title::from(format!("{}_{} ", key.name, key.metric_type.to_string()));
-    for attr in &key.attributes {
-        title.content.spans.extend([
-            Span::raw(attr.0).bold(),
-            Span::raw("="),
-            Span::raw(attr.1.to_string()),
-        ]);
-        title.content.push_span(Span::raw(" "));
-    }
-    title.alignment = Some(Alignment::Center);
-
     let chart = Chart::new(vec![data])
-        .block(Block::new().title(title))
+        .block(
+            Block::new()
+                .title(title(key))
+                .title_alignment(Alignment::Center),
+        )
         .x_axis(x_axis)
         .y_axis(y_axis);
 
@@ -328,7 +321,19 @@ fn render_histogram<'a>(
         bar("p99", p99, p99),
     ]);
 
+    let mut title = title(key);
+    title
+        .content
+        .spans
+        .extend([Span::raw("sum=").bold(), Span::raw(format!("{:.2}", sum))]);
+
     let barchart = BarChart::default()
+        .block(
+            Block::new()
+                .title(title)
+                .padding(Padding::new(3, 3, 1, 1))
+                .title_alignment(Alignment::Center),
+        )
         .direction(Direction::Horizontal)
         .bar_width(1)
         .bar_gap(0)
@@ -351,7 +356,9 @@ fn render_duration_histogram<'a>(
     };
 
     fn norm(x: &Duration, max: &Duration) -> u64 {
-        let x_norm = x.as_nanos().checked_div(max.as_nanos()).unwrap_or(0) * 100;
+        let x_norm = (x.as_nanos() * 100)
+            .checked_div(max.as_nanos())
+            .unwrap_or(0);
         x_norm as u64
     }
 
@@ -370,31 +377,74 @@ fn render_duration_histogram<'a>(
         bar("p99", p99, p99),
     ]);
 
+    let mut title = title(key);
+    title
+        .content
+        .spans
+        .extend([Span::raw("sum=").bold(), Span::raw(format!("{:.2?}", sum))]);
+
     let barchart = BarChart::default()
+        .block(
+            Block::new()
+                .title(title)
+                .padding(Padding::new(3, 3, 1, 1))
+                .title_alignment(Alignment::Center),
+        )
         .direction(Direction::Horizontal)
         .bar_width(1)
         .bar_gap(0)
-        .bar_style(Style::new().green().on_black())
+        .bar_style(Style::new().green())
         .data(data)
         .max(100);
 
     f.render_widget(barchart, area)
 }
 
-fn render_metrics<'a>(
-    metrics: impl std::iter::ExactSizeIterator<Item = (&'a MetricSetKey, &'a VecDeque<MetricValue>)>,
-    rect: Rect,
-    f: &mut Frame,
-) {
-    let layout = Layout::vertical((0..metrics.len()).map(|_| Constraint::Length(10))).split(rect);
-    for (metric, rect) in metrics.zip(layout.iter()) {
+fn render_metrics<'a, S: 'a>(metrics: &'a S, rect: Rect, f: &mut Frame)
+where
+    &'a S: std::iter::IntoIterator<Item = (&'a MetricSetKey, &'a VecDeque<MetricValue>)>,
+{
+    let layout = Layout::vertical(metrics.into_iter().map(|(key, _)| match key.metric_type {
+        MetricType::Counter => Constraint::Length(2),
+        MetricType::Gauge => Constraint::Length(10),
+        MetricType::Duration => Constraint::Length(7),
+        MetricType::Histogram => Constraint::Length(6),
+    }))
+    .spacing(1)
+    .split(rect);
+
+    for (metric, &rect) in metrics.into_iter().zip(layout.iter()) {
+        let rect = rect.inner(&Margin {
+            horizontal: 2,
+            vertical: 0,
+        });
         match metric.0.metric_type {
-            MetricType::Gauge => render_gauge(metric.0, metric.1.iter(), f, *rect),
-            MetricType::Histogram => render_histogram(metric.0, metric.1.iter(), f, *rect),
-            MetricType::Duration => render_duration_histogram(metric.0, metric.1.iter(), f, *rect),
+            MetricType::Gauge => render_gauge(metric.0, metric.1.iter(), f, rect),
+            MetricType::Histogram => render_histogram(metric.0, metric.1.iter(), f, rect),
+            MetricType::Duration => render_duration_histogram(metric.0, metric.1.iter(), f, rect),
             _ => todo!(),
         }
     }
+}
+
+fn margin(rect: Rect, h: u16, v: u16) -> Rect {
+    rect.inner(&Margin {
+        horizontal: h,
+        vertical: v,
+    })
+}
+
+fn title(key: &MetricSetKey) -> Title {
+    let mut title: Title = Title::from(format!("{}_{} ", key.name, key.metric_type.to_string()));
+    for attr in &key.attributes {
+        title.content.spans.extend([
+            Span::raw(attr.0).bold(),
+            Span::raw("="),
+            Span::raw(attr.1.to_string()),
+        ]);
+        title.content.push_span(Span::raw(" "));
+    }
+    title
 }
 
 pub fn ui(f: &mut Frame, app: &App) {
@@ -454,17 +504,27 @@ pub fn ui(f: &mut Frame, app: &App) {
                 Constraint::Min(0),
             ])
             .vertical_margin(1)
-            .horizontal_margin(2)
             .areas(left_area);
 
         f.render_widget(Block::bordered().borders(Borders::BOTTOM), logo_area);
+        f.render_widget(
+            Span::raw("┤"),
+            Rect {
+                x: logo_area.width - 1,
+                y: logo_area.height,
+                width: 1,
+                height: 1,
+            },
+        );
 
-        logo_render(f, logo_area);
-        scenario_render(f, scenario_area);
-        progress_render(f, progress_area);
-        executor_render(f, executors_area);
-        info_render(f, info_area);
-        render_metrics(app.current_exec().metrics.iter(), metric_area, f)
+        logo_render(f, margin(logo_area, 2, 0));
+        scenario_render(f, margin(scenario_area, 2, 0));
+        progress_render(f, margin(progress_area, 2, 0));
+        executor_render(f, margin(executors_area, 2, 0));
+        info_render(f, margin(info_area, 2, 0));
+
+        let metric_area = margin(metric_area, 1, 1);
+        render_metrics(&app.current_exec().metrics, metric_area, f)
     }
 }
 
