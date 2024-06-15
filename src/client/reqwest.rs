@@ -93,7 +93,8 @@ impl RequestBuilder {
         let host = request.url().host();
         let path = request.url().path();
         let method = request.method();
-        let span = span!(target: USER_TASK, Level::INFO, "reqwest", url = field::Empty, %path, %method, status = field::Empty);
+        let span =
+            span!(target: USER_TASK, Level::INFO, "reqwest", url = field::Empty, %path, %method);
         let _t = span.enter();
         if let Some(host) = host {
             span.record("url", field::display(host));
@@ -108,7 +109,7 @@ impl RequestBuilder {
         if let Some(size) = resp.content_length() {
             event!(name: "receive.gauge", target: USER_TASK, Level::INFO, value = size as f64);
         }
-        span.record("status", field::display(resp.status().as_u16()));
+        event!(name: "status.counter", target: USER_TASK, Level::INFO, status = resp.status().as_str(), value = 1u64);
         Ok(resp)
     }
 }
