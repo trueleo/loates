@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-tui = ["dep:ratatui", "dep:crossterm"]
+tui = ["dep:ratatui", "dep:crossterm", "dep:indexmap"]
 reqwest = ["dep:reqwest"]
 
 [dependencies]
@@ -28,11 +28,12 @@ tracing-subscriber = { version = "0.3", features = [
 ] }
 tracing = "0.1.40"
 tdigest = "0.2.3"
-ratatui = { version = "0.26", optional = true }
-crossterm = { version = "0.26", optional = true }
 macro_rules_attribute = "0.2.0"
 async_fn_traits = "0.1.1"
 http-body = "1.0.0"
+ratatui = { version = "0.26", optional = true }
+crossterm = { version = "0.26", optional = true }
+indexmap = { version = "2.2", optional = true }
 
 [dependencies.reqwest]
 version = "0.12"

@@ -1008,6 +1008,7 @@ dependencies = [
  "dashmap",
  "futures",
  "http-body",
+ "indexmap",
  "macro_rules_attribute",
  "ordered-float 4.2.0",
  "ratatui",
