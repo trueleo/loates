@@ -63,21 +63,22 @@ async fn user_builder(runtime: &RuntimeDataStore) -> impl User + '_ {
 
 #[tokio::main]
 async fn main() {
-    let execution = ExecutionPlan::builder()
+    let execution_once = ExecutionPlan::builder()
         .with_user_builder(user_builder)
         .with_data(datastore)
         .with_executor(Executor::Once);
 
-    let execution_once = ExecutionPlan::builder()
+    let execution_shared = ExecutionPlan::builder()
         .with_user_builder(user_builder)
         .with_data(datastore)
         .with_executor(Executor::Shared {
             users: 2,
-            iterations: 8,
-            duration: Duration::from_secs(4),
+            iterations: 1000,
+            duration: Duration::from_secs(100),
         });
 
-    let scenario = Scenario::new("scene1".to_string(), execution).with_executor(execution_once);
+    let scenario =
+        Scenario::new("scene1".to_string(), execution_shared).with_executor(execution_once);
     let scenarios = vec![scenario];
 
     Runner::new(scenarios).enable_tui(true).run().await.unwrap();
