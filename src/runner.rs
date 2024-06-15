@@ -46,12 +46,10 @@ impl<'env> Runner<'env> {
 
             // gather user_results from every executor.
             let (user_result_tx, user_result_rx) = crate::channel();
-            // close the ubounded_timer
-            let (sync_tx, _) = tokio::sync::broadcast::channel::<()>(1);
 
             for (executor_index, (executor_name, executor)) in scenario.iter_mut().enumerate() {
                 let span = tracing::span!(target: CRATE_NAME, parent: &span, tracing::Level::INFO, SPAN_EXEC, name = executor_name.as_ref(), id = executor_index as u64);
-                scoped_executor_spawn(span, executor, &mut scope, &sync_tx, user_result_tx.clone());
+                scoped_executor_spawn(span, executor, &mut scope, user_result_tx.clone());
             }
 
             drop(user_result_tx);
@@ -59,7 +57,6 @@ impl<'env> Runner<'env> {
                 scope.cancel();
                 break;
             } else {
-                let _ = sync_tx.send(());
                 Scope::collect(&mut scope).await;
             }
         }
@@ -179,12 +176,20 @@ fn scoped_executor_spawn<'s, 'a: 's>(
     span: Span,
     exec: &'s mut Box<dyn Executor + 'a>,
     scope: &mut Scope<'s, (), async_scoped::spawner::use_tokio::Tokio>,
-    sync_tx: &broadcast::Sender<()>,
     tx: crate::Sender<UserResult>,
 ) {
+    // close the ubounded_timer
+    let (sync_tx, sync_rx) = tokio::sync::broadcast::channel::<()>(1);
     let task = exec.execute(tx);
-    scope.spawn_cancellable(task.instrument(span.clone()), || ());
-    scope.spawn(unbounded_timer(sync_tx.subscribe()).instrument(span));
+    scope.spawn_cancellable(
+        async move {
+            task.await;
+            let _ = sync_tx.send(());
+        }
+        .instrument(span.clone()),
+        || (),
+    );
+    scope.spawn(unbounded_timer(sync_rx).instrument(span));
 }
 
 // async timer that ticks and sends a duration event.
