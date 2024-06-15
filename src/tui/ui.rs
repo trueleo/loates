@@ -234,7 +234,9 @@ fn render_gauge<'a>(
         .data(&data_points);
 
     // Create the X axis and define its properties
-    let x_axis = Axis::default().bounds([0.0, data_points.len() as f64]);
+    let x_axis = Axis::default()
+        .bounds([0.0, data_points.len() as f64])
+        .labels(vec!["0".into(), data_points.len().to_string().into()]);
 
     // Create the Y axis and define its properties
     let min = data_points
@@ -258,7 +260,12 @@ fn render_gauge<'a>(
     let mid = (min + max) / 2.;
 
     let y_axis = Axis::default()
-        .title("value over time".red())
+        .title(
+            data_points
+                .last()
+                .map(|x| x.1.to_string())
+                .unwrap_or_default(),
+        )
         .bounds([min, max])
         .labels(vec![
             format!("{:.2}", min).into(),

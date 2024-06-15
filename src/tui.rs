@@ -318,7 +318,7 @@ fn handle_message<B: Backend>(
                 exec.stage_duration = stage_duration;
                 metrics.into_iter().for_each(|(key, value)| {
                     let entry = exec.metrics.entry(key).or_default();
-                    if entry.len() > 20 {
+                    if entry.len() >= 20 {
                         entry.pop_back();
                     }
                     entry.push_front(value)
