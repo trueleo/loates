@@ -166,6 +166,10 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TracerLayer {
     }
 
     fn on_event(&self, event: &tracing::Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
+        if event.metadata().target() == USER_TASK {
+            handle_user_event(event, &ctx);
+            return;
+        }
         if event.metadata().target() == CRATE_NAME {
             match event.metadata().name() {
                 "runner_exit" => {
@@ -186,16 +190,13 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TracerLayer {
                     let _ = self.stats_sender.send(Message::Error { err: err.err });
                     return;
                 }
-                _ => (),
+                _ => {}
+            }
+
+            if let Some(message) = handle_crate_execution_event(event, &ctx) {
+                let _ = self.stats_sender.send(message);
             }
         }
-
-        if let Some(exec_update) = handle_crate_execution_event(event, &ctx) {
-            let _ = self.stats_sender.send(exec_update);
-            return;
-        }
-
-        handle_user_event(event, &ctx);
     }
 
     fn on_record(
