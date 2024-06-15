@@ -234,10 +234,7 @@ fn render_gauge<'a>(
         .data(&data_points);
 
     // Create the X axis and define its properties
-    let x_axis = Axis::default()
-        .title("X Axis".red())
-        .bounds([0.0, 15.0])
-        .labels(vec!["0.0".into(), "8.0".into(), "15.0".into()]);
+    let x_axis = Axis::default().bounds([0.0, data_points.len() as f64]);
 
     // Create the Y axis and define its properties
     let min = data_points
@@ -246,6 +243,9 @@ fn render_gauge<'a>(
         .min()
         .map(|x| x.0)
         .unwrap_or_default();
+
+    let min = (min - min * 0.1).trunc();
+
     let max = data_points
         .iter()
         .map(|x| OrderedFloat(x.1))
@@ -253,15 +253,17 @@ fn render_gauge<'a>(
         .map(|x| x.0)
         .unwrap_or(10.);
 
+    let max = (max + max * 0.2).ceil();
+
     let mid = (min + max) / 2.;
 
     let y_axis = Axis::default()
-        .title("Y Axis".red())
+        .title("value over time".red())
         .bounds([min, max])
         .labels(vec![
-            min.to_string().into(),
-            mid.to_string().into(),
-            max.to_string().into(),
+            format!("{:.2}", min).into(),
+            format!("{:.2}", mid).into(),
+            format!("{:.2}", max).into(),
         ]);
 
     let mut title = format!("{}_{}{{", key.name, key.metric_type.to_string());
