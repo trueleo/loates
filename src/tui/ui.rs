@@ -2,12 +2,13 @@ use std::{collections::VecDeque, time::Duration};
 
 use ordered_float::OrderedFloat;
 use ratatui::{
-    layout::{Constraint, Direction, Flex, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Flex, Layout, Rect},
     style::{Color, Style, Stylize},
     symbols,
     text::{Line, Span, Text},
     widgets::{
-        Axis, Bar, BarChart, BarGroup, Block, Borders, Chart, Dataset, Gauge, GraphType, Paragraph,
+        block::Title, Axis, Bar, BarChart, BarGroup, Block, Borders, Chart, Dataset, Gauge,
+        GraphType, Paragraph,
     },
     Frame,
 };
@@ -268,17 +269,21 @@ fn render_gauge<'a>(
         )
         .bounds([min, max])
         .labels(vec![
-            format!("{:.2}", min).into(),
-            format!("{:.2}", mid).into(),
-            format!("{:.2}", max).into(),
+            format!("{:.1}", min).into(),
+            format!("{:.1}", mid).into(),
+            format!("{:.1}", max).into(),
         ]);
 
-    let mut title = format!("{}_{}{{", key.name, key.metric_type.to_string());
+    let mut title: Title = Title::from(format!("{}_{} ", key.name, key.metric_type.to_string()));
     for attr in &key.attributes {
-        title.push_str(&format!("{}={}", attr.0, attr.1));
-        title.push(' ');
+        title.content.spans.extend([
+            Span::raw(attr.0).bold(),
+            Span::raw("="),
+            Span::raw(attr.1.to_string()),
+        ]);
+        title.content.push_span(Span::raw(" "));
     }
-    title.push('}');
+    title.alignment = Some(Alignment::Center);
 
     let chart = Chart::new(vec![data])
         .block(Block::new().title(title))
