@@ -8,6 +8,7 @@ use std::{
 };
 
 use atomic::Atomic;
+use ordered_float::OrderedFloat;
 use tdigest::TDigest;
 
 use super::Value;
@@ -154,7 +155,7 @@ impl Gauge {
 
 #[derive(Debug)]
 pub(crate) struct Histogram {
-    inner: Mutex<(Option<TDigest>, Vec<f64>, f64)>,
+    inner: Mutex<(Option<TDigest>, Vec<OrderedFloat<f64>>, f64)>,
 }
 
 impl Histogram {
@@ -166,9 +167,10 @@ impl Histogram {
 
     fn observe(&self, value: f64) {
         let mut inner = self.inner.lock().unwrap();
-        inner.1.push(value);
+        inner.1.push(OrderedFloat(value));
         if inner.1.len() >= 4096 {
             let values = std::mem::take(&mut inner.1);
+            let values = values.into_iter().map(|x| x.0).collect();
             if let Some(tdigest) = inner.0.as_mut() {
                 tdigest.merge_unsorted(values);
             } else {
@@ -181,13 +183,14 @@ impl Histogram {
     }
 
     fn get_percentile(&self, u: usize, l: usize) -> f64 {
-        let lock = self.inner.lock().unwrap();
+        let mut lock = self.inner.lock().unwrap();
         if let Some(tdigest) = &lock.0 {
             let quantile = u as f64 / l as f64;
             tdigest.estimate_quantile(quantile)
         } else {
             let index = (lock.1.len() * u) / l;
-            lock.1[index]
+            lock.1.sort_unstable();
+            lock.1[index].0
         }
     }
 
