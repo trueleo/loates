@@ -278,7 +278,7 @@ fn render_gauge<'a>(
         .block(
             Block::new()
                 .title(title(key))
-                .title_alignment(Alignment::Center),
+                .title_alignment(Alignment::Right),
         )
         .x_axis(x_axis)
         .y_axis(y_axis);
@@ -325,19 +325,20 @@ fn render_histogram<'a>(
     title
         .content
         .spans
-        .extend([Span::raw("sum=").bold(), Span::raw(format!("{:.2}", sum))]);
+        .extend([Span::raw("sum=").green(), Span::raw(format!("{:.2}", sum))]);
 
     let barchart = BarChart::default()
         .block(
             Block::new()
                 .title(title)
                 .padding(Padding::new(3, 3, 1, 1))
-                .title_alignment(Alignment::Center),
+                .title_alignment(Alignment::Left),
         )
         .direction(Direction::Horizontal)
         .bar_width(1)
         .bar_gap(0)
-        .bar_style(Style::new().green().on_black())
+        .bar_style(Style::new().green())
+        .value_style(Style::new().black())
         .data(data)
         .max(100);
 
@@ -381,19 +382,20 @@ fn render_duration_histogram<'a>(
     title
         .content
         .spans
-        .extend([Span::raw("sum=").bold(), Span::raw(format!("{:.2?}", sum))]);
+        .extend([Span::raw("sum=").green(), Span::raw(format!("{:.2?}", sum))]);
 
     let barchart = BarChart::default()
         .block(
             Block::new()
                 .title(title)
                 .padding(Padding::new(3, 3, 1, 1))
-                .title_alignment(Alignment::Center),
+                .title_alignment(Alignment::Left),
         )
         .direction(Direction::Horizontal)
         .bar_width(1)
         .bar_gap(0)
         .bar_style(Style::new().green())
+        .value_style(Style::new().black().on_green())
         .data(data)
         .max(100);
 
@@ -414,7 +416,7 @@ fn render_counter<'a>(
     let mut line = title(key).content;
     line.spans
         .extend([Span::raw(" - "), Span::raw(value.to_string())]);
-    line.alignment = Some(Alignment::Center);
+    line.alignment = Some(Alignment::Left);
     f.render_widget(line, rect);
 }
 
@@ -456,8 +458,8 @@ fn title(key: &MetricSetKey) -> Title {
     let mut title: Title = Title::from(format!("{}_{} ", key.name, key.metric_type.to_string()));
     for attr in &key.attributes {
         title.content.spans.extend([
-            Span::raw(attr.0).bold(),
-            Span::raw("="),
+            Span::raw(attr.0).green(),
+            Span::raw("=").green(),
             Span::raw(attr.1.to_string()),
         ]);
         title.content.push_span(Span::raw(" "));
