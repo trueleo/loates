@@ -400,6 +400,24 @@ fn render_duration_histogram<'a>(
     f.render_widget(barchart, area)
 }
 
+fn render_counter<'a>(
+    key: &MetricSetKey,
+    values: impl Iterator<Item = &'a MetricValue>,
+    f: &mut Frame,
+    rect: Rect,
+) {
+    let value = values.last().unwrap();
+    let MetricValue::Counter(value) = value else {
+        unreachable!()
+    };
+
+    let mut line = title(key).content;
+    line.spans
+        .extend([Span::raw(" - "), Span::raw(value.to_string())]);
+    line.alignment = Some(Alignment::Center);
+    f.render_widget(line, rect);
+}
+
 fn render_metrics<'a, S: 'a>(metrics: &'a S, rect: Rect, f: &mut Frame)
 where
     &'a S: std::iter::IntoIterator<Item = (&'a MetricSetKey, &'a VecDeque<MetricValue>)>,
@@ -422,7 +440,7 @@ where
             MetricType::Gauge => render_gauge(metric.0, metric.1.iter(), f, rect),
             MetricType::Histogram => render_histogram(metric.0, metric.1.iter(), f, rect),
             MetricType::Duration => render_duration_histogram(metric.0, metric.1.iter(), f, rect),
-            _ => todo!(),
+            MetricType::Counter => render_counter(metric.0, metric.1.iter(), f, rect),
         }
     }
 }
