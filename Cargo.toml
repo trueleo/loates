@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-tui = ["dep:ratatui", "dep:crossterm", "dep:indexmap"]
+tui = ["dep:ratatui", "dep:crossterm"]
 reqwest = ["dep:reqwest"]
 
 [dependencies]
@@ -33,7 +33,7 @@ async_fn_traits = "0.1.1"
 http-body = "1.0.0"
 ratatui = { version = "0.26", optional = true }
 crossterm = { version = "0.26", optional = true }
-indexmap = { version = "2.2", optional = true }
+itertools = "0.13"
 
 [dependencies.reqwest]
 version = "0.12"

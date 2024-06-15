@@ -1,5 +1,6 @@
 use std::{collections::VecDeque, time::Duration};
 
+use itertools::Itertools;
 use ordered_float::OrderedFloat;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Flex, Layout, Margin, Rect},
@@ -420,11 +421,8 @@ fn render_counter<'a>(
     f.render_widget(line, rect);
 }
 
-fn render_metrics<'a, S: 'a>(metrics: &'a S, rect: Rect, f: &mut Frame)
-where
-    &'a S: std::iter::IntoIterator<Item = (&'a MetricSetKey, &'a VecDeque<MetricValue>)>,
-{
-    let layout = Layout::vertical(metrics.into_iter().map(|(key, _)| match key.metric_type {
+fn render_metrics(metrics: &[(&MetricSetKey, &VecDeque<MetricValue>)], rect: Rect, f: &mut Frame) {
+    let layout = Layout::vertical(metrics.iter().map(|(key, _)| match key.metric_type {
         MetricType::Counter => Constraint::Length(2),
         MetricType::Gauge => Constraint::Length(10),
         MetricType::Duration => Constraint::Length(7),
@@ -433,7 +431,7 @@ where
     .spacing(1)
     .split(rect);
 
-    for (metric, &rect) in metrics.into_iter().zip(layout.iter()) {
+    for (metric, &rect) in metrics.iter().zip(layout.iter()) {
         let rect = rect.inner(&Margin {
             horizontal: 2,
             vertical: 0,
@@ -544,7 +542,13 @@ pub fn ui(f: &mut Frame, app: &App) {
         info_render(f, margin(info_area, 2, 0));
 
         let metric_area = margin(metric_area, 1, 1);
-        render_metrics(&app.current_exec().metrics, metric_area, f)
+        let metrics = app
+            .current_exec()
+            .metrics
+            .iter()
+            .sorted_by_key(|(x, _)| x.name)
+            .collect_vec();
+        render_metrics(&metrics, metric_area, f)
     }
 }
 

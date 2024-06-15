@@ -1,7 +1,7 @@
 pub mod ui;
 
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     error::Error,
     io,
     ops::ControlFlow,
@@ -11,7 +11,6 @@ use std::{
 };
 
 use crossterm::event::KeyCode;
-use indexmap::IndexMap;
 use ratatui::{
     backend::{Backend, CrosstermBackend},
     style::Stylize,
@@ -52,7 +51,7 @@ struct ExecutorState {
     task_min_time: Duration,
     task_max_time: Duration,
     task_total_time: Duration,
-    metrics: IndexMap<MetricSetKey, VecDeque<MetricValue>>,
+    metrics: HashMap<MetricSetKey, VecDeque<MetricValue>>,
 }
 
 pub struct Scenario {
