@@ -319,9 +319,9 @@ fn handle_message<B: Backend>(
                 metrics.into_iter().for_each(|(key, value)| {
                     let entry = exec.metrics.entry(key).or_default();
                     if entry.len() >= 20 {
-                        entry.pop_back();
+                        entry.pop_front();
                     }
-                    entry.push_front(value)
+                    entry.push_back(value)
                 });
             }
         }
