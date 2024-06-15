@@ -5,6 +5,8 @@ Rusher is inspired by tools like grafana k6, you can easily simulate a high numb
 
 Instead of being a tool like k6 which runs javascript for you, rusher is a simple rust library that any user can use to define their testcases. Rusher is not desgined with any paticular usecase in mind. It's upto the user to decide what they wanna loadtest and how.
 
+![screenshot of rusher in action](assets/screenshot.png)
+
 ## Features
 
 - **High Performance**: Leveraging Rust's performance and safety, Rusher can handle a high number of virtual users and concurrent requests with minimal overhead.
