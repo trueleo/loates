@@ -269,8 +269,7 @@ fn handle_message<B: Backend>(
         }
         Message::TaskTime {
             execution_id: id,
-            start_time,
-            end_time,
+            duration,
             ..
         } => {
             if let Some(exec) = app
@@ -279,7 +278,6 @@ fn handle_message<B: Backend>(
                 .iter_mut()
                 .find(|x| x.id == id)
             {
-                let duration = end_time.saturating_duration_since(start_time);
                 exec.iterations += 1;
                 exec.task_max_time = exec.task_max_time.max(duration);
                 if exec.task_min_time == Duration::ZERO {

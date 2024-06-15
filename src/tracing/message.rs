@@ -1,4 +1,4 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use super::task_event::{metrics::MetricValue, MetricSetKey};
 
@@ -8,8 +8,7 @@ pub enum Message {
     TaskTime {
         execution_id: usize,
         scenario_id: usize,
-        start_time: Instant,
-        end_time: Instant,
+        duration: Duration,
     },
     ExecutorUpdate {
         id: usize,

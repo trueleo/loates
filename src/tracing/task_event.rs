@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 use metrics::MetricType;
 use ordered_float::OrderedFloat;
+use tracing::span::Id;
 
 /// During the execution, any span scope/event generated within task should be trimmed down to metrics.
 /// This is done to reduce the scope of the UI and enrich the user with important metrics about calls made within the user task.
@@ -162,16 +163,8 @@ impl tracing::field::Visit for TaskEvent {
 
 pub struct TaskSpanData {
     pub start_time: Instant,
+    pub execution_span_id: Id,
     pub attributes: Vec<Attribute>,
-}
-
-impl Default for TaskSpanData {
-    fn default() -> Self {
-        Self {
-            start_time: Instant::now(),
-            attributes: Vec::default(),
-        }
-    }
 }
 
 impl tracing::field::Visit for TaskSpanData {
