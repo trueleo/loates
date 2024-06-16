@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, time::Duration};
+use std::{collections::VecDeque, fmt::Debug, time::Duration};
 
 use itertools::Itertools;
 use ordered_float::OrderedFloat;
@@ -212,19 +212,27 @@ fn other_info(current: &ExecutorState) -> (Size, impl FnOnce(&mut Frame, Rect) +
     (size, f)
 }
 
-fn render_gauge<'a>(
-    key: &MetricSetKey,
-    value: impl Iterator<Item = &'a MetricValue>,
-    f: &mut Frame,
-    area: Rect,
-) {
+fn render_gauge(key: &MetricSetKey, value: &VecDeque<MetricValue>, f: &mut Frame, area: Rect) {
+    let Some(min_value) = value.iter().reduce(|x, y| x.min_gauge(y)) else {
+        return;
+    };
+    let Some(max_value) = value.iter().reduce(|x, y| x.min_gauge(y)) else {
+        return;
+    };
+    let mid_value = min_value.mid(max_value);
+
     let data_points: Vec<(f64, f64)> = value
+        .iter()
         .enumerate()
         .map(|(x, y)| {
             let y = match y {
-                MetricValue::Gauge(x) => *x,
+                MetricValue::GaugeF64(x) => *x,
+                MetricValue::GaugeI64(x) => *x as f64,
+                MetricValue::GaugeU64(x) => *x as f64,
+                MetricValue::GaugeDuration(x) => x.as_millis() as f64,
                 _ => 0.,
             };
+
             (x as f64, y)
         })
         .collect();
@@ -259,8 +267,6 @@ fn render_gauge<'a>(
 
     let max = (max + max * 0.2).ceil();
 
-    let mid = (min + max) / 2.;
-
     let y_axis = Axis::default()
         .title(
             data_points
@@ -270,9 +276,9 @@ fn render_gauge<'a>(
         )
         .bounds([min, max])
         .labels(vec![
-            format!("{:.1}", min).into(),
-            format!("{:.1}", mid).into(),
-            format!("{:.1}", max).into(),
+            min_value.to_string().into(),
+            mid_value.to_string().into(),
+            max_value.to_string().into(),
         ]);
 
     let chart = Chart::new(vec![data])
@@ -294,90 +300,41 @@ fn render_histogram<'a>(
     area: Rect,
 ) {
     let value = value.last().unwrap();
-    let MetricValue::Histogram(((p50, p90, p95, p99), sum)) = value else {
-        unreachable!()
-    };
 
-    fn norm(x: f64, max: f64) -> u64 {
-        let x_norm = (x / max) * 100.;
-        if x_norm.is_nan() {
-            return 0;
-        }
-        let x_norm: u64 = unsafe { x_norm.to_int_unchecked() };
-        x_norm
-    }
-
-    let bar = |name: &'static str, value: &f64, max: &f64| -> Bar<'_> {
-        let norm = norm(*value, *max);
-        Bar::default()
-            .value(norm)
-            .text_value(value.to_string())
-            .label(name.into())
-    };
-
-    let data = BarGroup::default().bars(&[
-        bar("p50", p50, p99),
-        bar("p90", p90, p99),
-        bar("p95", p95, p99),
-        bar("p99", p99, p99),
-    ]);
-
-    let mut title = title(key);
-    title
-        .content
-        .spans
-        .extend([Span::raw("sum=").green(), Span::raw(format!("{:.2}", sum))]);
-
-    let barchart = BarChart::default()
-        .block(
-            Block::new()
-                .title(title)
-                .padding(Padding::new(3, 3, 1, 1))
-                .title_alignment(Alignment::Left),
-        )
-        .direction(Direction::Horizontal)
-        .bar_width(1)
-        .bar_gap(0)
-        .bar_style(Style::new().green())
-        .value_style(Style::new().black())
-        .data(data)
-        .max(100);
-
-    f.render_widget(barchart, area)
-}
-
-fn render_duration_histogram<'a>(
-    key: &MetricSetKey,
-    value: impl Iterator<Item = &'a MetricValue>,
-    f: &mut Frame,
-    area: Rect,
-) {
-    let value = value.last().unwrap();
-    let MetricValue::Duration(((p50, p90, p95, p99), sum)) = value else {
-        unreachable!()
-    };
-
-    fn norm(x: &Duration, max: &Duration) -> u64 {
-        let x_norm = (x.as_nanos() * 100)
-            .checked_div(max.as_nanos())
-            .unwrap_or(0);
-        x_norm as u64
-    }
-
-    let bar = |name: &'static str, value: &Duration, max: &Duration| -> Bar<'_> {
+    fn bar<'a, T: Debug>(
+        name: &'static str,
+        value: &'a T,
+        max: &'a T,
+        norm: fn(&'a T, &'a T) -> u64,
+    ) -> Bar<'static> {
         let norm = norm(value, max);
         Bar::default()
             .value(norm)
             .text_value(format!("{:.2?}", value))
             .label(name.into())
-    };
+    }
 
-    let data = BarGroup::default().bars(&[
-        bar("p50", p50, p99),
-        bar("p90", p90, p99),
-        bar("p95", p95, p99),
-        bar("p99", p99, p99),
-    ]);
+    let (bars, sum): (BarGroup, &dyn Debug) = match value {
+        MetricValue::Histogram(((p50, p90, p95, p99), sum)) => (
+            BarGroup::default().bars(&[
+                bar("p50", p50, p99, norm_f64),
+                bar("p90", p90, p99, norm_f64),
+                bar("p95", p95, p99, norm_f64),
+                bar("p99", p99, p99, norm_f64),
+            ]),
+            sum,
+        ),
+        MetricValue::DurationHistogram(((p50, p90, p95, p99), sum)) => (
+            BarGroup::default().bars(&[
+                bar("p50", p50, p99, norm_duration),
+                bar("p90", p90, p99, norm_duration),
+                bar("p95", p95, p99, norm_duration),
+                bar("p99", p99, p99, norm_duration),
+            ]),
+            sum,
+        ),
+        _ => unreachable!(),
+    };
 
     let mut title = title(key);
     title
@@ -396,8 +353,8 @@ fn render_duration_histogram<'a>(
         .bar_width(1)
         .bar_gap(0)
         .bar_style(Style::new().green())
-        .value_style(Style::new().black().on_green())
-        .data(data)
+        .value_style(Style::new().black())
+        .data(bars)
         .max(100);
 
     f.render_widget(barchart, area)
@@ -425,8 +382,7 @@ fn render_metrics(metrics: &[(&MetricSetKey, &VecDeque<MetricValue>)], rect: Rec
     let layout = Layout::vertical(metrics.iter().map(|(key, _)| match key.metric_type {
         MetricType::Counter => Constraint::Length(2),
         MetricType::Gauge => Constraint::Length(10),
-        MetricType::Duration => Constraint::Length(7),
-        MetricType::Histogram => Constraint::Length(6),
+        MetricType::Histogram => Constraint::Length(7),
     }))
     .spacing(1)
     .split(rect);
@@ -437,9 +393,8 @@ fn render_metrics(metrics: &[(&MetricSetKey, &VecDeque<MetricValue>)], rect: Rec
             vertical: 0,
         });
         match metric.0.metric_type {
-            MetricType::Gauge => render_gauge(metric.0, metric.1.iter(), f, rect),
+            MetricType::Gauge => render_gauge(metric.0, metric.1, f, rect),
             MetricType::Histogram => render_histogram(metric.0, metric.1.iter(), f, rect),
-            MetricType::Duration => render_duration_histogram(metric.0, metric.1.iter(), f, rect),
             MetricType::Counter => render_counter(metric.0, metric.1.iter(), f, rect),
         }
     }
@@ -572,4 +527,20 @@ fn value_span(value: String) -> [Span<'static>; 2] {
         Span::raw(value).light_blue(),
         Span::raw(padding(INFO_CELL_SIZE.saturating_sub(size).max(1))),
     ]
+}
+
+fn norm_duration(x: &Duration, max: &Duration) -> u64 {
+    let x_norm = (x.as_nanos() * 100)
+        .checked_div(max.as_nanos())
+        .unwrap_or(0);
+    x_norm as u64
+}
+
+fn norm_f64(x: &f64, max: &f64) -> u64 {
+    let x_norm = (x / max) * 100.;
+    if x_norm.is_nan() {
+        return 0;
+    }
+    let x_norm: u64 = unsafe { x_norm.to_int_unchecked() };
+    x_norm
 }

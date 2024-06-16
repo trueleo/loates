@@ -34,6 +34,7 @@ http-body = "1.0.0"
 ratatui = { version = "0.26", optional = true }
 crossterm = { version = "0.26", optional = true }
 itertools = "0.13"
+bytemuck = "1.16.0"
 
 [dependencies.reqwest]
 version = "0.12"

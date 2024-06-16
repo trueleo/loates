@@ -419,7 +419,7 @@ fn close_task_child_span<'a, S: Subscriber + for<'lookup> LookupSpan<'lookup>>(
     attributes.reverse();
     let event = TaskEvent::new(
         span.name(),
-        MetricType::Duration,
+        MetricType::Histogram,
         attributes.into_iter().flatten().collect(),
         task_inner_span.start_time.elapsed().into(),
     );

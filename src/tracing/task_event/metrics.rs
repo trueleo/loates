@@ -18,7 +18,6 @@ pub enum MetricType {
     Counter,
     Gauge,
     Histogram,
-    Duration,
 }
 
 #[allow(clippy::to_string_trait_impl)]
@@ -28,7 +27,6 @@ impl ToString for MetricType {
             MetricType::Counter => "counter".to_string(),
             MetricType::Gauge => "gauge".to_string(),
             MetricType::Histogram => "histogram".to_string(),
-            MetricType::Duration => "duration".to_string(),
         }
     }
 }
@@ -41,49 +39,159 @@ impl FromStr for MetricType {
             "counter" => Ok(Self::Counter),
             "gauge" => Ok(Self::Gauge),
             "histogram" => Ok(Self::Histogram),
-            "duration" => Ok(Self::Duration),
             _ => Err(()),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum MetricValue {
     Counter(u64),
-    Gauge(f64),
+    GaugeF64(f64),
+    GaugeI64(i64),
+    GaugeU64(u64),
+    GaugeDuration(Duration),
     /// histogram values ((p50, p90, p95, p99), sum)
     Histogram(((f64, f64, f64, f64), f64)),
-    Duration(((Duration, Duration, Duration, Duration), Duration)),
+    DurationHistogram(((Duration, Duration, Duration, Duration), Duration)),
+}
+
+#[allow(clippy::to_string_trait_impl)]
+impl ToString for MetricValue {
+    fn to_string(&self) -> String {
+        match self {
+            MetricValue::Counter(x) => x.to_string(),
+            MetricValue::GaugeF64(x) => x.to_string(),
+            MetricValue::GaugeI64(x) => x.to_string(),
+            MetricValue::GaugeU64(x) => x.to_string(),
+            MetricValue::GaugeDuration(x) => format!("{:.2?}", x),
+            MetricValue::Histogram(x) => format!("{:.2?}", x),
+            MetricValue::DurationHistogram(x) => format!("{:.2?}", x),
+        }
+    }
+}
+
+impl MetricValue {
+    pub fn min_gauge<'a>(&'a self, other: &'a Self) -> &'a Self {
+        match (self, other) {
+            (&Self::GaugeF64(x), &Self::GaugeF64(y)) => {
+                if x < y {
+                    self
+                } else {
+                    other
+                }
+            }
+            (&Self::GaugeU64(x), &Self::GaugeU64(y)) => {
+                if x < y {
+                    self
+                } else {
+                    other
+                }
+            }
+            (&Self::GaugeI64(x), &Self::GaugeI64(y)) => {
+                if x < y {
+                    self
+                } else {
+                    other
+                }
+            }
+            (&Self::GaugeDuration(x), &Self::GaugeDuration(y)) => {
+                if x < y {
+                    self
+                } else {
+                    other
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn max_gauge<'a>(&'a self, other: &'a Self) -> &'a Self {
+        match (self, other) {
+            (&Self::GaugeF64(x), &Self::GaugeF64(y)) => {
+                if x > y {
+                    self
+                } else {
+                    other
+                }
+            }
+            (&Self::GaugeU64(x), &Self::GaugeU64(y)) => {
+                if x > y {
+                    self
+                } else {
+                    other
+                }
+            }
+            (&Self::GaugeI64(x), &Self::GaugeI64(y)) => {
+                if x > y {
+                    self
+                } else {
+                    other
+                }
+            }
+            (&Self::GaugeDuration(x), &Self::GaugeDuration(y)) => {
+                if x > y {
+                    self
+                } else {
+                    other
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+    pub fn mid<'a>(&'a self, other: &'a Self) -> Self {
+        match (self, other) {
+            (&Self::GaugeF64(x), &Self::GaugeF64(y)) => Self::GaugeF64((x + y) / 2.),
+            (&Self::GaugeU64(x), &Self::GaugeU64(y)) => Self::GaugeU64((x + y) / 2),
+            (&Self::GaugeI64(x), &Self::GaugeI64(y)) => Self::GaugeI64((x + y) / 2),
+            (&Self::GaugeDuration(x), &Self::GaugeDuration(y)) => Self::GaugeDuration((x + y) / 2),
+            _ => unreachable!(),
+        }
+    }
 }
 
 #[derive(Debug)]
 pub(crate) enum Metric {
     Counter(Counter),
-    Gauge(Gauge),
+    GaugeF64(Gauge<f64>),
+    GaugeI64(Gauge<i64>),
+    GaugeU64(Gauge<u64>),
+    GaugeDuration((Gauge<u64>, Gauge<u32>)),
     Histogram(Histogram),
     Duration(Histogram),
 }
 
 impl Metric {
-    pub fn new(ty: MetricType) -> Self {
-        match ty {
-            MetricType::Counter => Self::Counter(Counter::new()),
-            MetricType::Gauge => Self::Gauge(Gauge::new()),
-            MetricType::Histogram => Self::Histogram(Histogram::new()),
-            MetricType::Duration => Self::Duration(Histogram::new()),
+    pub fn new(ty: MetricType, value: &Value) -> Self {
+        match (ty, value) {
+            (MetricType::Counter, Value::UnsignedNumber(_)) => Self::Counter(Counter::new()),
+            (MetricType::Gauge, Value::Float(_)) => Self::GaugeF64(Gauge::new()),
+            (MetricType::Gauge, Value::Number(_)) => Self::GaugeI64(Gauge::new()),
+            (MetricType::Gauge, Value::UnsignedNumber(_)) => Self::GaugeU64(Gauge::new()),
+            (MetricType::Gauge, Value::Duration(_)) => {
+                Self::GaugeDuration((Gauge::new(), Gauge::new()))
+            }
+            (MetricType::Histogram, Value::Float(_)) => Self::Histogram(Histogram::new()),
+            (MetricType::Histogram, Value::Duration(_)) => Self::Duration(Histogram::new()),
+            _ => panic!("Unsupported value type for metric"),
         }
     }
 
-    pub(crate) fn update(&self, value: Value, metric_type: MetricType) {
-        match (self, metric_type, value) {
-            (Metric::Counter(x), MetricType::Counter, Value::UnsignedNumber(val)) => x.add(val),
-            (Metric::Gauge(x), MetricType::Gauge, Value::Float(f)) => x.set(f.0),
-            (Metric::Histogram(x), MetricType::Histogram, Value::Float(val)) => x.observe(val.0),
-            (Metric::Duration(x), MetricType::Duration, Value::Duration(f)) => {
+    pub(crate) fn update(&self, value: Value) {
+        match (self, value) {
+            (Metric::Counter(x), Value::UnsignedNumber(val)) => x.add(val),
+            (Metric::GaugeF64(x), Value::Float(f)) => x.set(f.0),
+            (Metric::GaugeI64(x), Value::Number(f)) => x.set(f),
+            (Metric::GaugeU64(x), Value::UnsignedNumber(f)) => x.set(f),
+            (Metric::GaugeDuration((sec, nanos)), Value::Duration(f)) => {
+                sec.set(f.as_secs());
+                nanos.set(f.subsec_nanos())
+            }
+            (Metric::Histogram(x), Value::Float(val)) => x.observe(val.0),
+            (Metric::Duration(x), Value::Duration(f)) => {
                 let val = f.as_nanos() as u64;
                 x.observe(val as f64)
             }
-            (Metric::Duration(x), MetricType::Duration, Value::Float(f)) => x.observe(f.0),
             _ => {}
         }
     }
@@ -91,7 +199,12 @@ impl Metric {
     pub fn value(&self) -> MetricValue {
         match self {
             Metric::Counter(x) => MetricValue::Counter(x.get()),
-            Metric::Gauge(x) => MetricValue::Gauge(x.get()),
+            Metric::GaugeF64(x) => MetricValue::GaugeF64(x.get()),
+            Metric::GaugeI64(x) => MetricValue::GaugeI64(x.get()),
+            Metric::GaugeU64(x) => MetricValue::GaugeU64(x.get()),
+            Metric::GaugeDuration(x) => {
+                MetricValue::GaugeDuration(Duration::new(x.0.get(), x.1.get()))
+            }
             Metric::Histogram(x) => MetricValue::Histogram((x.get_percentiles(), x.get_sum())),
             Metric::Duration(x) => {
                 let f = |f: f64| -> u64 {
@@ -105,7 +218,10 @@ impl Metric {
                 let p90 = Duration::from_nanos(f(p90));
                 let p95 = Duration::from_nanos(f(p95));
                 let p99 = Duration::from_nanos(f(p99));
-                MetricValue::Duration(((p50, p90, p95, p99), Duration::from_nanos(f(x.get_sum()))))
+                MetricValue::DurationHistogram((
+                    (p50, p90, p95, p99),
+                    Duration::from_nanos(f(x.get_sum())),
+                ))
             }
         }
     }
@@ -133,22 +249,22 @@ impl Counter {
 }
 
 #[derive(Debug)]
-pub(crate) struct Gauge {
-    pub(crate) value: Atomic<f64>,
+pub(crate) struct Gauge<T: bytemuck::NoUninit> {
+    pub(crate) value: Atomic<T>,
 }
 
-impl Gauge {
+impl<T: bytemuck::NoUninit + Default> Gauge<T> {
     pub(crate) fn new() -> Self {
         Gauge {
-            value: Atomic::new(0.),
+            value: Atomic::new(T::default()),
         }
     }
 
-    pub(crate) fn set(&self, value: f64) {
+    pub(crate) fn set(&self, value: T) {
         self.value.swap(value, Ordering::Relaxed);
     }
 
-    pub(crate) fn get(&self) -> f64 {
+    pub(crate) fn get(&self) -> T {
         self.value.load(Ordering::Relaxed)
     }
 }

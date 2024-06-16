@@ -21,6 +21,8 @@ use tracing::span::Id;
 /// Type to capture arbritary spans
 pub mod metrics;
 
+pub type Attribute = (&'static str, Value);
+
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct MetricSetKey {
     pub name: &'static str,
@@ -38,10 +40,10 @@ impl MetricSet {
         let metric = self.inner.get(&event.key);
 
         if let Some(metric) = metric {
-            metric.update(event.value, event.key.metric_type);
+            metric.update(event.value);
         } else {
-            let v = metrics::Metric::new(event.key.metric_type);
-            v.update(event.value, event.key.metric_type);
+            let v = metrics::Metric::new(event.key.metric_type, &event.value);
+            v.update(event.value);
             self.inner.insert(event.key, v);
         }
     }
@@ -80,8 +82,6 @@ impl std::fmt::Display for Value {
         }
     }
 }
-
-pub type Attribute = (&'static str, Value);
 
 pub struct TaskEvent {
     key: MetricSetKey,

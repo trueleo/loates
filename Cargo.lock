@@ -1013,6 +1013,7 @@ dependencies = [
  "async-trait",
  "async_fn_traits",
  "atomic",
+ "bytemuck",
  "crossterm 0.26.1",
  "dashmap",
  "futures",
