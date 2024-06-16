@@ -95,7 +95,7 @@ fn executor_text<'a>(
 
 fn progress_bar(current: &ExecutorState) -> (Size, impl FnOnce(&mut Frame, Rect)) {
     let progress = if let Some(total_duration) = current.total_duration {
-        let duration = &current.duration;
+        let duration = current.duration();
         Gauge::default()
             .label(format!("{duration:?}/{total_duration:?}"))
             .ratio((duration.as_secs_f64() / total_duration.as_secs_f64()).min(1f64))
@@ -136,7 +136,7 @@ fn other_info(current: &ExecutorState) -> (Size, impl FnOnce(&mut Frame, Rect) +
     let total_iterations_completed_formatted = current.iterations.to_string();
     let iteration_per_sec_formatted = format!(
         "{:.2} iter/sec",
-        current.iterations as f64 / current.duration.as_secs_f64()
+        current.iterations as f64 / current.duration().as_secs_f64()
     );
 
     let stages_formatted = current.stages.map(|x| x.to_string());
@@ -224,11 +224,11 @@ fn render_gauge(key: &MetricSetKey, value: &VecDeque<MetricValue>, f: &mut Frame
     let data_points: Vec<(f64, f64)> = value
         .iter()
         .enumerate()
-        .map(|(x, y)| {
+        .map(|(x, &y)| {
             let y = match y {
-                MetricValue::GaugeF64(x) => *x,
-                MetricValue::GaugeI64(x) => *x as f64,
-                MetricValue::GaugeU64(x) => *x as f64,
+                MetricValue::GaugeF64(x) => x,
+                MetricValue::GaugeI64(x) => x as f64,
+                MetricValue::GaugeU64(x) => x as f64,
                 MetricValue::GaugeDuration(x) => x.as_millis() as f64,
                 _ => 0.,
             };

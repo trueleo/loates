@@ -179,35 +179,6 @@ fn scoped_executor_spawn<'s, 'a: 's>(
     tx: crate::Sender<UserResult>,
 ) {
     // close the ubounded_timer
-    let (sync_tx, sync_rx) = tokio::sync::broadcast::channel::<()>(1);
     let task = exec.execute(tx);
-    scope.spawn_cancellable(
-        async move {
-            task.await;
-            let _ = sync_tx.send(());
-        }
-        .instrument(span.clone()),
-        || (),
-    );
-    scope.spawn(unbounded_timer(sync_rx).instrument(span));
-}
-
-// async timer that ticks and sends a duration event.
-// This timer can be stopped using a oneshot channel.
-async fn unbounded_timer(mut stop: broadcast::Receiver<()>) {
-    let start_time = Instant::now();
-    let timer = || async {
-        let duration_since = Instant::now().duration_since(start_time).as_secs();
-        event!(target: CRATE_NAME, Level::INFO, duration = duration_since);
-        tokio::time::sleep(Duration::from_secs(1)).await
-    };
-    loop {
-        let timer = timer();
-        tokio::select! {
-            _ = (stop.recv()) => {
-                break;
-            }
-            _ = (timer) => {}
-        }
-    }
+    scope.spawn_cancellable(task.instrument(span.clone()), || ());
 }

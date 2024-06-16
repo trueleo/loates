@@ -10,6 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use chrono::{DateTime, Utc};
 use crossterm::event::KeyCode;
 use ratatui::{
     backend::{Backend, CrosstermBackend},
@@ -43,7 +44,8 @@ struct ExecutorState {
     max_users: u64,
     iterations: u64,
     total_iteration: Option<u64>,
-    duration: Duration,
+    prior_duration: Duration,
+    start_time: DateTime<Utc>,
     total_duration: Option<Duration>,
     stage: Option<usize>,
     stage_duration: Option<Duration>,
@@ -52,6 +54,12 @@ struct ExecutorState {
     task_max_time: Duration,
     task_total_time: Duration,
     metrics: HashMap<MetricSetKey, VecDeque<MetricValue>>,
+}
+
+impl ExecutorState {
+    fn duration(&self) -> Duration {
+        self.prior_duration + (Utc::now() - self.start_time).abs().to_std().unwrap()
+    }
 }
 
 pub struct Scenario {
@@ -293,7 +301,6 @@ fn handle_message<B: Backend>(
             users,
             max_users,
             total_iteration,
-            duration,
             total_duration,
             stage,
             stages,
@@ -308,7 +315,6 @@ fn handle_message<B: Backend>(
             {
                 exec.users = users;
                 exec.max_users = max_users;
-                exec.duration = duration;
                 exec.total_duration = total_duration;
                 exec.total_iteration = total_iteration;
                 exec.stage = stage;
@@ -323,6 +329,22 @@ fn handle_message<B: Backend>(
                 });
             }
         }
+        Message::ExecutorStart {
+            id,
+            start_time,
+            prior_executor_duration,
+        } => {
+            if let Some(exec) = app
+                .current_scenario_mut()
+                .execs
+                .iter_mut()
+                .find(|x| x.id == id)
+            {
+                exec.start_time = start_time;
+                exec.prior_duration = prior_executor_duration;
+            }
+        }
+        Message::ExecutorEnd { .. } => {}
     };
     ControlFlow::Continue(())
 }

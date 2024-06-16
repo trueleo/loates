@@ -2,11 +2,13 @@ pub mod message;
 pub mod task_event;
 
 use std::{
+    collections::HashMap,
     ops::ControlFlow,
     str::FromStr,
     time::{Duration, Instant},
 };
 
+use chrono::{DateTime, Utc};
 use message::Message;
 use task_event::{metrics::MetricType, MetricSet, TaskEvent, TaskSpanData};
 use tracing::{
@@ -58,7 +60,6 @@ impl From<&ExecutionData> for Message {
             users: value.users,
             max_users: value.max_users,
             total_iteration: value.total_iteration,
-            duration: value.duration,
             total_duration: value.total_duration,
             stage: value.stage,
             stages: value.total_stages,
@@ -68,9 +69,15 @@ impl From<&ExecutionData> for Message {
     }
 }
 
+struct ExecutorTimings {
+    start_time: DateTime<Utc>,
+    prior_duration: Duration,
+}
+
 /// Tracked data associated with a span of a scenario .
 struct ScenarioData {
     id: usize,
+    executor_timings: HashMap<usize, ExecutorTimings>,
 }
 
 impl tracing::field::Visit for ExecutionData {
@@ -156,10 +163,7 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TracerLayer {
                 create_exec_span(attr, &span);
             }
             SPAN_SCENARIO => {
-                let mut visitor = ScenarioData { id: usize::MAX };
-                attr.values().record(&mut visitor);
-                let mut extentions = span.extensions_mut();
-                extentions.insert(visitor);
+                create_scenario_span(attr, span);
             }
             _ => (),
         }
@@ -218,6 +222,12 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TracerLayer {
     fn on_close(&self, id: span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
         let Some(span) = ctx.span(&id) else { return };
 
+        if span.metadata().name() == SPAN_EXEC {
+            let message = close_exec_span(span);
+            let _ = self.stats_sender.send(message);
+            return;
+        }
+
         if span.metadata().name() == SPAN_TASK {
             let messages = close_task_span(span, &ctx);
             for message in messages {
@@ -232,7 +242,20 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TracerLayer {
     }
 }
 
-fn create_exec_span<'a, S: LookupSpan<'a>>(attr: &span::Attributes, span: &SpanRef<'a, S>) {
+fn create_scenario_span<S: for<'a> LookupSpan<'a>>(attr: &span::Attributes, span: SpanRef<S>) {
+    let mut visitor = ScenarioData {
+        id: usize::MAX,
+        executor_timings: HashMap::default(),
+    };
+    attr.values().record(&mut visitor);
+    let mut extentions = span.extensions_mut();
+    extentions.insert(visitor);
+}
+
+fn create_exec_span<'a, S: LookupSpan<'a>>(
+    attr: &span::Attributes,
+    span: &SpanRef<'a, S>,
+) -> Message {
     let mut visitor = ExecutionData {
         id: usize::MAX,
         users: 0,
@@ -246,8 +269,31 @@ fn create_exec_span<'a, S: LookupSpan<'a>>(attr: &span::Attributes, span: &SpanR
         metrics: MetricSet::default(),
     };
     attr.values().record(&mut visitor);
+    let id = visitor.id;
     let mut extentions = span.extensions_mut();
     extentions.insert(visitor);
+
+    let start_time = Utc::now();
+
+    let scenario = span.parent().unwrap();
+    let mut scenario = scenario.extensions_mut();
+    let scenario_data = scenario
+        .get_mut::<ScenarioData>()
+        .unwrap()
+        .executor_timings
+        .entry(id)
+        .or_insert_with(|| ExecutorTimings {
+            start_time,
+            prior_duration: Duration::ZERO,
+        });
+
+    scenario_data.start_time = start_time;
+
+    Message::ExecutorStart {
+        id,
+        start_time,
+        prior_executor_duration: scenario_data.prior_duration,
+    }
 }
 
 fn create_task_span<'a, S: LookupSpan<'a>>(span: &SpanRef<'a, S>) {
@@ -369,6 +415,18 @@ fn handle_crate_execution_event<S: Subscriber + for<'a> LookupSpan<'a>>(
     let exec_data = exec_ext.get_mut::<ExecutionData>()?;
     event.record(exec_data);
     Some(Message::from(&*exec_data))
+}
+
+fn close_exec_span<S: Subscriber + for<'a> LookupSpan<'a>>(span: SpanRef<S>) -> Message {
+    let exec_id = span.extensions().get::<ExecutionData>().unwrap().id;
+    let scenario = span.parent().unwrap();
+    let mut scenario = scenario.extensions_mut();
+    let scenario = scenario.get_mut::<ScenarioData>().unwrap();
+    scenario
+        .executor_timings
+        .entry(exec_id)
+        .and_modify(|x| x.prior_duration += (Utc::now() - x.start_time).abs().to_std().unwrap());
+    Message::ExecutorEnd { id: exec_id }
 }
 
 fn close_task_span<'a, S: Subscriber + for<'lookup> LookupSpan<'lookup>>(

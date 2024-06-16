@@ -44,7 +44,7 @@ impl FromStr for MetricType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub enum MetricValue {
     Counter(u64),
     GaugeF64(f64),
