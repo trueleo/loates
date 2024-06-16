@@ -45,7 +45,7 @@ struct ExecutorState {
     iterations: u64,
     total_iteration: Option<u64>,
     prior_duration: Duration,
-    start_time: DateTime<Utc>,
+    start_time: Option<DateTime<Utc>>,
     total_duration: Option<Duration>,
     stage: Option<usize>,
     stage_duration: Option<Duration>,
@@ -58,7 +58,10 @@ struct ExecutorState {
 
 impl ExecutorState {
     fn duration(&self) -> Duration {
-        self.prior_duration + (Utc::now() - self.start_time).abs().to_std().unwrap()
+        let Some(start_time) = self.start_time else {
+            return Duration::ZERO;
+        };
+        self.prior_duration + (Utc::now() - start_time).abs().to_std().unwrap()
     }
 }
 
@@ -340,7 +343,7 @@ fn handle_message<B: Backend>(
                 .iter_mut()
                 .find(|x| x.id == id)
             {
-                exec.start_time = start_time;
+                exec.start_time = Some(start_time);
                 exec.prior_duration = prior_executor_duration;
             }
         }

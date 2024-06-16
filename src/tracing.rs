@@ -160,7 +160,8 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TracerLayer {
                 create_task_span(&span);
             }
             SPAN_EXEC => {
-                create_exec_span(attr, &span);
+                let message = create_exec_span(attr, &span);
+                let _ = self.stats_sender.send(message);
             }
             SPAN_SCENARIO => {
                 create_scenario_span(attr, span);
