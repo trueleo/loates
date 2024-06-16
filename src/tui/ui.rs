@@ -97,7 +97,7 @@ fn progress_bar(current: &ExecutorState) -> (Size, impl FnOnce(&mut Frame, Rect)
     let progress = if let Some(total_duration) = current.total_duration {
         let duration = current.duration();
         Gauge::default()
-            .label(format!("{duration:?}/{total_duration:?}"))
+            .label(format!("{duration:.2?}/{total_duration:.2?}"))
             .ratio((duration.as_secs_f64() / total_duration.as_secs_f64()).min(1f64))
     } else if let Some(total_iteration) = current.total_iteration {
         let iteration = current.iterations;
