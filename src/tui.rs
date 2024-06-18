@@ -80,7 +80,7 @@ impl Scenario {
             .enumerate()
             .map(|(index, exec)| ExecutorState {
                 id: index,
-                name: exec.label().to_string(),
+                name: exec.config().to_string(),
                 ..Default::default()
             })
             .collect();

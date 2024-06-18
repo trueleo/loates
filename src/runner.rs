@@ -33,7 +33,7 @@ impl<'env> Runner<'env> {
         let tui_handle = self.spawn_tui();
 
         let mut runtime_ctx = self.create_contexts();
-        let mut scenarios = self.runtime_scenario(&mut runtime_ctx).await;
+        let mut scenarios = self.runtime_scenarios(&mut runtime_ctx).await;
 
         for (scenario_index, (scenario_name, scenario)) in scenarios.iter_mut().enumerate() {
             let span = tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_SCENARIO, name = scenario_name.as_ref(), id = scenario_index as u64);
@@ -46,7 +46,7 @@ impl<'env> Runner<'env> {
             let (user_result_tx, user_result_rx) = crate::channel();
 
             for (executor_index, (executor_name, executor)) in scenario.iter_mut().enumerate() {
-                let span = tracing::span!(target: CRATE_NAME, parent: &span, tracing::Level::INFO, SPAN_EXEC, name = executor_name.as_ref(), id = executor_index as u64);
+                let span = tracing::span!(target: CRATE_NAME, parent: &span, tracing::Level::INFO, SPAN_EXEC, name = %executor_name, id = executor_index as u64);
                 scoped_executor_spawn(span, executor, &mut scope, user_result_tx.clone());
             }
 
@@ -69,16 +69,19 @@ impl<'env> Runner<'env> {
         Ok(())
     }
 
-    async fn runtime_scenario<'a>(
+    async fn runtime_scenarios<'a>(
         &'a self,
         runtime_ctx: &'a mut [Vec<ExecutionRuntimeCtx>],
-    ) -> Vec<(Cow<str>, Vec<(Cow<str>, Box<dyn Executor + '_>)>)> {
+    ) -> Vec<(
+        Cow<str>,
+        Vec<(&'a logical::Executor, Box<dyn Executor + '_>)>,
+    )> {
         let mut scenarios = Vec::new();
         let runtime_ctx_mut = runtime_ctx.iter_mut().map(|x| x.iter_mut());
         for (logical_scenario, context) in self.logical.scenarios.iter().zip(runtime_ctx_mut) {
             let mut scenario = Vec::new();
             for (exec, context) in logical_scenario.execution_provider.iter().zip(context) {
-                scenario.push((exec.label(), exec.execution(context).await))
+                scenario.push((exec.config(), exec.execution(context).await))
             }
             scenarios.push((logical_scenario.label.clone(), scenario))
         }

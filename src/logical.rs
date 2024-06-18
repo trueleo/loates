@@ -58,9 +58,35 @@ pub enum Executor {
     },
 }
 
+impl std::fmt::Display for Executor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Executor::Once => f.write_str("Once"),
+            Executor::Constant { users, duration } => {
+                write!(f, "Constant ({} users) {:?}", users, duration)
+            }
+            Executor::Shared {
+                users, iterations, ..
+            } => write!(f, "Shared ({} users) {}", users, iterations),
+            Executor::PerUser { users, iterations } => {
+                write!(f, "PerUser ({} users) {}", users, iterations)
+            }
+            Executor::ConstantArrivalRate { rate, duration, .. } => {
+                write!(f, "ConstantArrivalRate {} for {:?}", rate, duration)
+            }
+            Executor::RampingUser { stages, .. } => {
+                write!(f, "RampingUser ({} stages)", stages.len())
+            }
+            Executor::RampingArrivalRate { stages, .. } => {
+                write!(f, "RampingArrivalRate ({}, stages)", stages.len())
+            }
+        }
+    }
+}
+
 #[async_trait::async_trait]
 pub trait ExecutionProvider {
-    fn label(&self) -> Cow<'_, str>;
+    fn config(&self) -> &Executor;
     async fn execution<'a>(
         &'a self,
         ctx: &'a mut ExecutionRuntimeCtx,
@@ -122,10 +148,6 @@ impl ExecutionPlan<'static, ()> {
         }
     }
 
-    pub fn with_label(&mut self, label: impl Into<Cow<'static, str>>) {
-        self.label = Some(label.into());
-    }
-
     pub fn with_user_builder<'env, F>(
         self,
         user_builder: F,
@@ -162,32 +184,8 @@ impl<'env, Ub> ExecutionProvider for ExecutionPlan<'env, Ub>
 where
     Ub: for<'a> AsyncUserBuilder<'a>,
 {
-    fn label(&self) -> Cow<'_, str> {
-        if let Some(ref label) = self.label {
-            return Cow::Borrowed(label.as_ref());
-        }
-
-        match &self.executor {
-            Executor::Once => Cow::Borrowed("Once"),
-            Executor::Constant { users, duration } => {
-                format!("Constant ({} users) {:?}", users, duration).into()
-            }
-            Executor::Shared {
-                users, iterations, ..
-            } => format!("Shared ({} users) {}", users, iterations).into(),
-            Executor::PerUser { users, iterations } => {
-                format!("PerUser ({} users) {}", users, iterations).into()
-            }
-            Executor::ConstantArrivalRate { rate, duration, .. } => {
-                format!("ConstantArrivalRate {} for {:?}", rate, duration).into()
-            }
-            Executor::RampingUser { stages, .. } => {
-                format!("RampingUser ({} stages)", stages.len()).into()
-            }
-            Executor::RampingArrivalRate { stages, .. } => {
-                format!("RampingArrivalRate ({}, stages)", stages.len()).into()
-            }
-        }
+    fn config(&self) -> &Executor {
+        &self.executor
     }
 
     async fn execution<'a>(
