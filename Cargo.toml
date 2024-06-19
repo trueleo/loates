@@ -7,6 +7,8 @@ edition = "2021"
 
 [features]
 tui = ["dep:ratatui", "dep:crossterm"]
+web = ["dep:axum", "serde"]
+
 reqwest = ["dep:reqwest"]
 
 [dependencies]
@@ -31,11 +33,14 @@ tdigest = "0.2.3"
 macro_rules_attribute = "0.2.0"
 async_fn_traits = "0.1.1"
 http-body = "1.0.0"
-ratatui = { version = "0.26", optional = true }
-crossterm = { version = "0.26", optional = true }
 itertools = "0.13"
 bytemuck = "1.16.0"
 chrono = "0.4.38"
+
+ratatui = { version = "0.26", optional = true }
+crossterm = { version = "0.26", optional = true }
+axum = { version = "0.7.5", features = ["json"], optional = true }
+serde = { version = "1.0.203", features = ["derive"], optional = true }
 
 [dependencies.reqwest]
 version = "0.12"
@@ -47,6 +52,11 @@ optional = true
 name = "simple"
 path = "./examples/simple.rs"
 required-features = ["tui", "reqwest"]
+
+[[example]]
+name = "web"
+path = "./examples/web.rs"
+required-features = ["web", "reqwest"]
 
 [dev-dependencies.reqwest]
 version = "0.12"

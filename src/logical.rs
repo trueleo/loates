@@ -8,6 +8,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Rate(pub usize, pub Duration);
 
 impl From<Rate> for (usize, Duration) {
@@ -26,6 +27,7 @@ impl std::fmt::Display for Rate {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum Executor {
     Once,
     Constant {

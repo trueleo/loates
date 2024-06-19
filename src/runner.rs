@@ -15,6 +15,8 @@ pub struct Runner<'env> {
     logical: LogicalContext<'env>,
     #[cfg(feature = "tui")]
     enable_tui: bool,
+    #[cfg(feature = "web")]
+    enable_web: bool,
 }
 
 impl<'env> Runner<'env> {
@@ -23,7 +25,9 @@ impl<'env> Runner<'env> {
         Self {
             logical: LogicalContext { scenarios },
             #[cfg(feature = "tui")]
-            enable_tui: true,
+            enable_tui: false,
+            #[cfg(feature = "web")]
+            enable_web: false,
         }
     }
 
@@ -31,6 +35,9 @@ impl<'env> Runner<'env> {
     pub async fn run(&self) -> Result<(), crate::error::Error> {
         #[cfg(feature = "tui")]
         let tui_handle = self.spawn_tui();
+
+        #[cfg(feature = "web")]
+        let web_handle = self.spawn_web();
 
         let mut runtime_ctx = self.create_contexts();
         let mut scenarios = self.runtime_scenarios(&mut runtime_ctx).await;
@@ -64,6 +71,11 @@ impl<'env> Runner<'env> {
         #[cfg(feature = "tui")]
         if let Some(handle) = tui_handle {
             let _ = handle.join();
+        }
+
+        #[cfg(feature = "web")]
+        if let Some(handle) = web_handle {
+            let _ = handle.await;
         }
 
         Ok(())
@@ -112,6 +124,12 @@ impl<'env> Runner<'env> {
         self
     }
 
+    #[cfg(feature = "web")]
+    pub fn enable_web(mut self, enable: bool) -> Self {
+        self.enable_web = enable;
+        self
+    }
+
     #[cfg(feature = "tui")]
     fn spawn_tui(
         &self,
@@ -122,7 +140,9 @@ impl<'env> Runner<'env> {
             return None;
         }
 
-        let (tracer, rx_tracer) = crate::tracing::TracerLayer::new();
+        let (tx, rx) = crate::channel();
+
+        let tracer = crate::tracing::TracerLayer::new(tx);
         let subscriber = tracing_subscriber::layer::SubscriberExt::with(
             tracing_subscriber::Registry::default(),
             tracer,
@@ -131,7 +151,31 @@ impl<'env> Runner<'env> {
         tracing::subscriber::set_global_default(subscriber).unwrap();
 
         let app = Arc::new(Mutex::new(crate::app::App::new(&self.logical.scenarios)));
-        Some(std::thread::spawn(|| crate::app::tui::run(app, rx_tracer)))
+        Some(std::thread::spawn(|| crate::app::tui::run(app, rx)))
+    }
+
+    #[cfg(feature = "web")]
+    fn spawn_web(
+        &self,
+    ) -> Option<tokio::task::JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>> {
+        use std::sync::{Arc, Mutex};
+
+        if !self.enable_web {
+            return None;
+        }
+
+        let (tx, rx) = crate::channel();
+
+        let tracer = crate::tracing::TracerLayer::new(tx);
+        let subscriber = tracing_subscriber::layer::SubscriberExt::with(
+            tracing_subscriber::Registry::default(),
+            tracer,
+        );
+
+        tracing::subscriber::set_global_default(subscriber).unwrap();
+
+        let app = Arc::new(Mutex::new(crate::app::App::new(&self.logical.scenarios)));
+        Some(tokio::spawn(crate::app::web::run(app, rx)))
     }
 }
 

@@ -14,6 +14,7 @@ use tdigest::TDigest;
 use super::Value;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum MetricType {
     Counter,
     Gauge,
@@ -45,6 +46,7 @@ impl FromStr for MetricType {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum MetricValue {
     Counter(u64),
     GaugeF64(f64),

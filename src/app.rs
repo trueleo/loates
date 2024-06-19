@@ -12,11 +12,13 @@ use crate::{
         task_event::{metrics::MetricValue, MetricSetKey},
     },
 };
-
+#[cfg(feature = "tui")]
 pub mod tui;
-// pub mod web;
+#[cfg(feature = "web")]
+pub mod web;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 struct ExecutorState {
     config: Executor,
     users: u64,
@@ -24,6 +26,7 @@ struct ExecutorState {
     iterations: u64,
     total_iteration: Option<u64>,
     prior_duration: Duration,
+    #[cfg_attr(feature = "serde", serde(serialize_with = "serialize_to_rfc3339_opts"))]
     start_time: Option<DateTime<Utc>>,
     total_duration: Option<Duration>,
     stage: Option<usize>,
@@ -44,6 +47,8 @@ impl ExecutorState {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[derive(Debug, Clone)]
 pub struct Scenario {
     name: String,
     execs: Vec<ExecutorState>,
@@ -82,6 +87,8 @@ impl Scenario {
     }
 }
 
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct App {
     current_scenario: usize,
     scenarios: Vec<Scenario>,
@@ -177,4 +184,16 @@ impl App {
             _ => (),
         }
     }
+}
+
+#[cfg(feature = "web")]
+pub fn serialize_to_rfc3339_opts<S: serde::Serializer>(
+    t: &Option<DateTime<Utc>>,
+    s: S,
+) -> Result<S::Ok, S::Error> {
+    serde::Serialize::serialize(
+        &t.as_ref()
+            .map(|x| x.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
+        s,
+    )
 }

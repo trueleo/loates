@@ -51,7 +51,9 @@ async fn main() {
     //     .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
     //     .init();
 
-    let (tracer, mut rx) = TracerLayer::new();
+    let (tx, mut rx) = rusher::channel();
+
+    let tracer = TracerLayer::new(tx);
     tracing::subscriber::set_global_default(Registry::default().with(tracer)).unwrap();
 
     let execution = ExecutionPlan::builder()

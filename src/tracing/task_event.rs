@@ -24,6 +24,7 @@ pub mod metrics;
 pub type Attribute = (&'static str, Value);
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct MetricSetKey {
     pub name: &'static str,
     pub metric_type: MetricType,
@@ -57,10 +58,12 @@ impl MetricSet {
 
 /// Represents scalar values that are allowed to be in a user eventErrorVisitor's attribute set.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum Value {
     String(String),
     Number(i64),
     UnsignedNumber(u64),
+    #[cfg_attr(feature = "serde", serde(serialize_with = "serialize_ordered_float"))]
     Float(OrderedFloat<f64>),
     Duration(Duration),
 }
@@ -198,4 +201,12 @@ impl tracing::field::Visit for TaskSpanData {
             Value::Duration(Duration::from_nanos(value as u64)),
         ));
     }
+}
+
+#[cfg(feature = "web")]
+fn serialize_ordered_float<S: serde::Serializer>(
+    x: &OrderedFloat<f64>,
+    s: S,
+) -> Result<S::Ok, S::Error> {
+    serde::Serialize::serialize(&x.0, s)
 }

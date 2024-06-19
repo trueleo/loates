@@ -116,20 +116,39 @@ impl Visit for ErrorVisitor {
     }
 }
 
-// Tracing layer that tracks and generates message based on this crate's tracing events
-pub struct TracerLayer {
-    // current_scenario: Mutex<String>,
-    stats_sender: crate::Sender<Message>,
+pub trait Sender {
+    fn send(&self, message: Message);
 }
 
-impl TracerLayer {
-    pub fn new() -> (Self, crate::Receiver<Message>) {
-        let (tx, rx) = crate::channel();
-        (Self { stats_sender: tx }, rx)
+impl Sender for crate::Sender<Message> {
+    fn send(&self, message: Message) {
+        let _ = self.send(message);
     }
 }
 
-impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TracerLayer {
+impl Sender for tokio::sync::broadcast::Sender<Message> {
+    fn send(&self, message: Message) {
+        let _ = self.send(message);
+    }
+}
+
+// Tracing layer that tracks and generates message based on this crate's tracing events
+pub struct TracerLayer<T: Sender> {
+    // current_scenario: Mutex<String>,
+    stats_sender: T,
+}
+
+impl<T: Sender> TracerLayer<T> {
+    pub fn new(sender: T) -> Self {
+        Self {
+            stats_sender: sender,
+        }
+    }
+}
+
+impl<T: Sender + 'static, S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S>
+    for TracerLayer<T>
+{
     fn enabled(
         &self,
         metadata: &tracing::Metadata<'_>,
@@ -161,7 +180,7 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TracerLayer {
             }
             SPAN_EXEC => {
                 let message = create_exec_span(attr, &span);
-                let _ = self.stats_sender.send(message);
+                self.stats_sender.send(message);
             }
             SPAN_SCENARIO => {
                 create_scenario_span(attr, span);
@@ -178,28 +197,27 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TracerLayer {
         if event.metadata().target() == CRATE_NAME {
             match event.metadata().name() {
                 "runner_exit" => {
-                    let _ = self.stats_sender.send(Message::End);
+                    self.stats_sender.send(Message::End);
                     return;
                 }
                 "termination_error" => {
                     let mut err = ErrorVisitor::default();
                     event.record(&mut err);
-                    let _ = self
-                        .stats_sender
+                    self.stats_sender
                         .send(Message::TerminatedError { err: err.err });
                     return;
                 }
                 "error" => {
                     let mut err = ErrorVisitor::default();
                     event.record(&mut err);
-                    let _ = self.stats_sender.send(Message::Error { err: err.err });
+                    self.stats_sender.send(Message::Error { err: err.err });
                     return;
                 }
                 _ => {}
             }
 
             if let Some(message) = handle_crate_execution_event(event, &ctx) {
-                let _ = self.stats_sender.send(message);
+                self.stats_sender.send(message);
             }
         }
     }
@@ -225,14 +243,14 @@ impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TracerLayer {
 
         if span.metadata().name() == SPAN_EXEC {
             let message = close_exec_span(span);
-            let _ = self.stats_sender.send(message);
+            self.stats_sender.send(message);
             return;
         }
 
         if span.metadata().name() == SPAN_TASK {
             let messages = close_task_span(span, &ctx);
             for message in messages {
-                let _ = self.stats_sender.send(message);
+                self.stats_sender.send(message);
             }
             return;
         }
