@@ -143,7 +143,7 @@ struct Command {
     value: String,
 }
 
-async fn commands(Json(payload): Json<Command>) -> impl IntoResponse {
-    println!("Received command: {:?}", payload);
+async fn commands(Json(command): Json<Command>) -> impl IntoResponse {
+    println!("Received command: {} {}", command.action, command.value);
     StatusCode::OK
 }
