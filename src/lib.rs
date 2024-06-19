@@ -1,5 +1,9 @@
+#[cfg(any(feature = "tui", feature = "web"))]
+pub mod app;
+
 #[cfg(feature = "reqwest")]
 pub mod client;
+
 pub mod config;
 pub mod data;
 pub mod error;
@@ -7,8 +11,6 @@ pub mod executor;
 pub mod logical;
 pub mod runner;
 pub mod tracing;
-#[cfg(feature = "tui")]
-pub mod tui;
 pub mod user;
 
 pub use crate::logical::Scenario;

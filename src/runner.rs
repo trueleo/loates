@@ -116,6 +116,8 @@ impl<'env> Runner<'env> {
     fn spawn_tui(
         &self,
     ) -> Option<std::thread::JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>> {
+        use std::sync::{Arc, Mutex};
+
         if !self.enable_tui {
             return None;
         }
@@ -128,8 +130,8 @@ impl<'env> Runner<'env> {
 
         tracing::subscriber::set_global_default(subscriber).unwrap();
 
-        let app = crate::tui::App::new(&self.logical.scenarios);
-        Some(std::thread::spawn(|| app.run(rx_tracer)))
+        let app = Arc::new(Mutex::new(crate::app::App::new(&self.logical.scenarios)));
+        Some(std::thread::spawn(|| crate::app::tui::run(app, rx_tracer)))
     }
 }
 

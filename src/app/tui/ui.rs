@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, fmt::Debug, time::Duration};
+use std::{collections::VecDeque, fmt::Debug, sync::Mutex, time::Duration};
 
 use itertools::Itertools;
 use ordered_float::OrderedFloat;
@@ -14,12 +14,15 @@ use ratatui::{
     Frame,
 };
 
-use crate::tracing::task_event::{
-    metrics::{MetricType, MetricValue},
-    MetricSetKey,
+use crate::{
+    app::{App, ExecutorState},
+    tracing::task_event::{
+        metrics::{MetricType, MetricValue},
+        MetricSetKey,
+    },
 };
 
-use super::{App, ExecutorState};
+use super::TuiState;
 
 const LOGO: &str = "\
 ╔═══╗╔╗ ╔╗╔═══╗╔╗ ╔╗╔═══╗╔═══╗
@@ -62,7 +65,7 @@ fn scenario_text(name: &str) -> (Size, impl FnOnce(&mut Frame, Rect) + '_) {
 
 fn executor_text<'a>(
     current_exec: usize,
-    exec_names: impl Iterator<Item = &'a str>,
+    exec_names: impl Iterator<Item = String>,
 ) -> (Size, impl FnOnce(&mut Frame, Rect) + 'a) {
     let mut executors_text = Text::from(Line::from("Executors: ".to_string().bold()));
     for (index, exec) in exec_names.enumerate() {
@@ -420,15 +423,20 @@ fn title(key: &MetricSetKey) -> Title {
     title
 }
 
-pub fn ui(f: &mut Frame, app: &App) {
+pub(super) fn ui(f: &mut Frame, app: &Mutex<App>, state: &TuiState) {
     let area = f.size();
+    let app = app.lock().unwrap();
 
     let (logo_size, logo_render) = logo();
     let (scenario_size, scenario_render) = scenario_text(&app.current_scenario().name);
-    let (executor_size, executor_render) =
-        executor_text(app.current_exec, app.current_scenario().exec_names());
-    let (progress_size, progress_render) = progress_bar(app.current_exec());
-    let (info_size, info_render) = other_info(app.current_exec());
+    let (executor_size, executor_render) = executor_text(
+        state.current_exec_selected,
+        app.current_scenario().exec_names(),
+    );
+    let (progress_size, progress_render) =
+        progress_bar(&app.current_scenario().execs[state.current_exec_selected]);
+    let (info_size, info_render) =
+        other_info(&app.current_scenario().execs[state.current_exec_selected]);
 
     let left_width = logo_size
         .width
@@ -497,8 +505,7 @@ pub fn ui(f: &mut Frame, app: &App) {
         info_render(f, margin(info_area, 2, 0));
 
         let metric_area = margin(metric_area, 1, 1);
-        let metrics = app
-            .current_exec()
+        let metrics = app.current_scenario().execs[state.current_exec_selected]
             .metrics
             .iter()
             .sorted_by_key(|(x, _)| x.name)

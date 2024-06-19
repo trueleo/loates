@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use super::task_event::{metrics::MetricValue, MetricSetKey};
 
 /// Output Message genenerated by this tracing layer
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Message {
     TaskTime {
         execution_id: usize,
