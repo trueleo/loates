@@ -47,6 +47,7 @@ impl FromStr for MetricType {
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(untagged))]
 pub enum MetricValue {
     Counter(u64),
     GaugeF64(f64),

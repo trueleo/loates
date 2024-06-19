@@ -28,6 +28,7 @@ impl std::fmt::Display for Rate {
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(tag = "type"))]
 pub enum Executor {
     Once,
     Constant {

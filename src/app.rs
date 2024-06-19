@@ -35,6 +35,7 @@ struct ExecutorState {
     task_min_time: Duration,
     task_max_time: Duration,
     task_total_time: Duration,
+    #[cfg_attr(feature = "serde", serde(serialize_with = "serialize_metric"))]
     metrics: HashMap<MetricSetKey, VecDeque<MetricValue>>,
 }
 
@@ -196,4 +197,17 @@ pub fn serialize_to_rfc3339_opts<S: serde::Serializer>(
             .map(|x| x.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
         s,
     )
+}
+
+#[cfg(feature = "serde")]
+fn serialize_metric<S: serde::Serializer>(
+    t: &HashMap<MetricSetKey, VecDeque<MetricValue>>,
+    s: S,
+) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeSeq as _;
+    let mut seq = s.serialize_seq(Some(t.len()))?;
+    for entry in t.iter() {
+        seq.serialize_element(&entry)?;
+    }
+    seq.end()
 }
