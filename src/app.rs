@@ -27,13 +27,24 @@ struct ExecutorState {
     users: u64,
     max_users: u64,
     iterations: u64,
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
     total_iteration: Option<u64>,
     prior_duration: Duration,
-    #[cfg_attr(feature = "serde", serde(serialize_with = "serialize_to_rfc3339_opts"))]
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            serialize_with = "serialize_to_rfc3339_opts",
+            skip_serializing_if = "Option::is_none"
+        )
+    )]
     start_time: Option<DateTime<Utc>>,
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
     total_duration: Option<Duration>,
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
     stage: Option<usize>,
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
     stage_duration: Option<Duration>,
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
     stages: Option<usize>,
     task_min_time: Duration,
     task_max_time: Duration,

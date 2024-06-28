@@ -23,10 +23,15 @@ pub enum Message {
         id: usize,
         users: u64,
         max_users: u64,
+        #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
         total_iteration: Option<u64>,
+        #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
         total_duration: Option<Duration>,
+        #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
         stage: Option<usize>,
+        #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
         stage_duration: Option<Duration>,
+        #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
         stages: Option<usize>,
         metrics: Vec<(MetricSetKey, MetricValue)>,
     },
