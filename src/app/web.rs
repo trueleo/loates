@@ -9,8 +9,8 @@ use futures::Future;
 use serde::Deserialize;
 use std::{
     error::Error,
-    future::IntoFuture,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use crate::tracing::message::Message;
@@ -21,40 +21,25 @@ pub fn run(
     app: Arc<Mutex<App>>,
     mut rx: crate::Receiver<Message>,
 ) -> impl Future<Output = Result<(), Box<dyn Error + Send + Sync + 'static>>> + Send + 'static {
-    let (broadcast_tx, _) = tokio::sync::broadcast::channel(100);
-
     let router = Router::new()
-        .route("/", get(index))
         .route("/updates", get(stream_messages))
-        .with_state(broadcast_tx.clone())
-        .route("/init", get(get_schema))
         .with_state(app.clone())
         .route("/commands", axum::routing::post(commands))
         .fallback(get(index))
         .layer(tower_http::cors::CorsLayer::very_permissive());
 
     async move {
-        let handle = tokio::spawn(async move {
+        tokio::spawn(async move {
             while let Some(message) = rx.recv().await {
                 let end = matches!(message, Message::End);
                 app.lock().unwrap().handle_message(message.clone());
-                let _ = broadcast_tx.send(message);
                 if end {
                     break;
                 }
             }
         });
         let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
-        let server = axum::serve(listener, router.into_make_service()).into_future();
-
-        tokio::select! {
-            res = handle => {
-                res?;
-            }
-            res = server => {
-                res?;
-            }
-        }
+        axum::serve(listener, router.into_make_service()).await?;
         Ok(())
     }
 }
@@ -115,27 +100,29 @@ async fn index() -> Html<&'static str> {
     )
 }
 
-async fn stream_messages(
-    State(messages): State<tokio::sync::broadcast::Sender<Message>>,
-) -> impl IntoResponse {
-    let mut messages = messages.subscribe();
+async fn stream_messages(State(app): State<Arc<Mutex<App>>>) -> impl IntoResponse {
+    let app = app.clone();
 
     let messages = async_stream::stream! {
         loop {
-            let message = messages.recv().await.map_err(axum::Error::new)?;
-            yield Event::default().json_data(&message);
-            if matches!(message, Message::End) {
+            let (event, ended) = {
+                 let app = app.lock().unwrap();
+                 let ended = app
+                     .scenarios
+                     .iter()
+                     .all(|s| s.execs.iter().all(|exec| exec.ended));
+                 let event =  Event::default().json_data(&*app);
+                (event, ended)
+            };
+            yield event;
+            if ended {
                 break;
             }
+            tokio::time::sleep(Duration::from_millis(200)).await;
         }
     };
 
     axum::response::Sse::new(messages)
-}
-
-async fn get_schema(State(app): State<Arc<Mutex<App>>>) -> impl IntoResponse {
-    let t = app.lock().unwrap().clone();
-    axum::Json::from(t)
 }
 
 #[derive(Debug, Deserialize)]
