@@ -28,6 +28,7 @@ impl std::fmt::Display for Rate {
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(rename_all_fields = "camelCase"))]
 #[cfg_attr(feature = "serde", serde(tag = "type"))]
 pub enum Executor {
     Once,
@@ -52,7 +53,7 @@ pub enum Executor {
     },
     RampingUser {
         pre_allocate_users: usize,
-        stages: Vec<(Duration, usize)>,
+        stages: Vec<(usize, Duration)>,
     },
     RampingArrivalRate {
         pre_allocate_users: usize,

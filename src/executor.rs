@@ -302,14 +302,14 @@ pub(crate) struct RampingUser<'ctx, Ub> {
     datastore: &'ctx RuntimeDataStore,
     user_builder: &'ctx Ub,
     pre_allocate_users: usize,
-    stages: Vec<(Duration, usize)>,
+    stages: Vec<(usize, Duration)>,
 }
 
 impl<'ctx, Ub> RampingUser<'ctx, Ub> {
     fn new(
         datastore: &'ctx RuntimeDataStore,
         user_builder: &'ctx Ub,
-        stages: Vec<(Duration, usize)>,
+        stages: Vec<(usize, Duration)>,
         initial_users: usize,
     ) -> Self {
         Self {
@@ -330,7 +330,7 @@ where
         let user_builder = self.user_builder;
         let pre_allocated_users = self.pre_allocate_users;
         let stages = &*self.stages;
-        let total_duration: u64 = stages.iter().map(|(duration, _)| duration.as_secs()).sum();
+        let total_duration: u64 = stages.iter().map(|(_, duration)| duration.as_secs()).sum();
 
         let task = async move {
             event!(target: CRATE_NAME, Level::INFO, total_duration = total_duration);
@@ -339,7 +339,7 @@ where
                 .unwrap();
             event!(target: CRATE_NAME, Level::INFO, users = users.len(), users_max = pre_allocated_users);
 
-            for (index, (duration, target_users)) in stages.iter().enumerate() {
+            for (index, (target_users, duration)) in stages.iter().enumerate() {
                 event!(target: CRATE_NAME, Level::INFO, stage = index + 1, stages = stages.len(), stage_duration = duration.as_secs());
                 event!(target: CRATE_NAME, Level::INFO, users = users.len(), users_max = target_users.max(&pre_allocated_users));
 

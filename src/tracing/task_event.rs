@@ -25,6 +25,7 @@ pub type Attribute = (&'static str, Value);
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct MetricSetKey {
     pub name: &'static str,
     pub metric_type: MetricType,
@@ -59,6 +60,7 @@ impl MetricSet {
 /// Represents scalar values that are allowed to be in a user eventErrorVisitor's attribute set.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(untagged))]
 pub enum Value {
     String(String),
     Number(i64),

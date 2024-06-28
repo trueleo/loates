@@ -30,7 +30,8 @@ pub fn run(
         .route("/init", get(get_schema))
         .with_state(app.clone())
         .route("/commands", axum::routing::post(commands))
-        .fallback(get(index));
+        .fallback(get(index))
+        .layer(tower_http::cors::CorsLayer::very_permissive());
 
     async move {
         let handle = tokio::spawn(async move {

@@ -19,6 +19,7 @@ pub mod web;
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 struct ExecutorState {
     config: Executor,
     users: u64,
@@ -49,6 +50,7 @@ impl ExecutorState {
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 #[derive(Debug, Clone)]
 pub struct Scenario {
     name: String,
@@ -90,6 +92,7 @@ impl Scenario {
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct App {
     current_scenario: usize,
     scenarios: Vec<Scenario>,
@@ -194,7 +197,7 @@ pub fn serialize_to_rfc3339_opts<S: serde::Serializer>(
 ) -> Result<S::Ok, S::Error> {
     serde::Serialize::serialize(
         &t.as_ref()
-            .map(|x| x.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
+            .map(|x| x.to_rfc3339_opts(chrono::SecondsFormat::Millis, false)),
         s,
     )
 }

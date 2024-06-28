@@ -50,5 +50,5 @@ pub fn serialize_to_rfc3339_opts<S: serde::Serializer>(
     t: &DateTime<Utc>,
     s: S,
 ) -> Result<S::Ok, S::Error> {
-    serde::Serialize::serialize(&t.to_rfc3339_opts(chrono::SecondsFormat::Millis, true), s)
+    serde::Serialize::serialize(&t.to_rfc3339_opts(chrono::SecondsFormat::Millis, false), s)
 }
