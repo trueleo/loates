@@ -12,6 +12,7 @@ use crate::{
         task_event::{metrics::MetricValue, MetricSetKey},
     },
 };
+
 #[cfg(feature = "tui")]
 pub mod tui;
 #[cfg(feature = "web")]
@@ -21,6 +22,7 @@ pub mod web;
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 struct ExecutorState {
+    ended: bool,
     config: Executor,
     users: u64,
     max_users: u64,
@@ -64,6 +66,7 @@ impl Scenario {
             .execution_provider
             .iter()
             .map(|exec| ExecutorState {
+                ended: false,
                 config: exec.config().clone(),
                 users: Default::default(),
                 max_users: Default::default(),
@@ -184,6 +187,7 @@ impl App {
                     exec.prior_duration += (Utc::now() - start_time).abs().to_std().unwrap()
                 }
                 exec.start_time = None;
+                exec.ended = true
             }
             _ => (),
         }
