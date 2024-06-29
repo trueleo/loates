@@ -3,12 +3,12 @@ use std::borrow::Cow;
 use crate::data::DatastoreModifier;
 use crate::data::RuntimeDataStore;
 use crate::executor::Executor;
-use crate::{UserResult, CRATE_NAME, SPAN_EXEC, SPAN_SCENARIO};
+use crate::{CRATE_NAME, SPAN_EXEC, SPAN_SCENARIO};
 
 use crate::logical;
 
 use async_scoped::{self, Scope};
-use tracing::{event, Instrument, Span};
+use tracing::{event, Instrument};
 
 /// The Runner struct is the top level struct for managing and executing series of logical scenarios asynchronously.
 pub struct Runner<'env> {
