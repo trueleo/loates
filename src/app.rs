@@ -21,7 +21,7 @@ pub mod web;
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
-struct ExecutorState {
+pub struct ExecutorState {
     ended: bool,
     config: Executor,
     users: u64,
@@ -54,7 +54,7 @@ struct ExecutorState {
 }
 
 impl ExecutorState {
-    fn duration(&self) -> Duration {
+    pub fn duration(&self) -> Duration {
         let Some(start_time) = self.start_time else {
             return self.prior_duration;
         };
@@ -128,15 +128,15 @@ impl App {
         }
     }
 
-    fn current_scenario(&self) -> &Scenario {
+    pub fn current_scenario(&self) -> &Scenario {
         &self.scenarios[self.current_scenario]
     }
 
-    fn current_scenario_mut(&mut self) -> &mut Scenario {
+    pub fn current_scenario_mut(&mut self) -> &mut Scenario {
         &mut self.scenarios[self.current_scenario]
     }
 
-    fn handle_message(&mut self, message: Message) {
+    pub fn handle_message(&mut self, message: Message) {
         match message {
             Message::ScenarioChanged { scenario_id } => {
                 self.current_scenario = scenario_id;
