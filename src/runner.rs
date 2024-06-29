@@ -54,7 +54,8 @@ impl<'env> Runner<'env> {
 
             for (executor_index, (executor_name, executor)) in scenario.iter_mut().enumerate() {
                 let span = tracing::span!(target: CRATE_NAME, parent: &span, tracing::Level::INFO, SPAN_EXEC, name = %executor_name, id = executor_index as u64);
-                scoped_executor_spawn(span, executor, &mut scope, user_result_tx.clone());
+                let task = executor.execute(user_result_tx.clone());
+                scope.spawn_cancellable(task.instrument(span.clone()), || ());
             }
 
             drop(user_result_tx);
@@ -217,15 +218,4 @@ async fn has_user_terminated<'s>(
         }
     }
     false
-}
-
-fn scoped_executor_spawn<'s, 'a: 's>(
-    span: Span,
-    exec: &'s mut Box<dyn Executor + 'a>,
-    scope: &mut Scope<'s, (), async_scoped::spawner::use_tokio::Tokio>,
-    tx: crate::Sender<UserResult>,
-) {
-    // close the ubounded_timer
-    let task = exec.execute(tx);
-    scope.spawn_cancellable(task.instrument(span.clone()), || ());
 }
