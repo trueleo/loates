@@ -183,7 +183,9 @@ impl<T: Sender + 'static, S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer
                 self.stats_sender.send(message);
             }
             SPAN_SCENARIO => {
-                create_scenario_span(attr, span);
+                let id = create_scenario_span(attr, span);
+                self.stats_sender
+                    .send(Message::ScenarioChanged { scenario_id: id })
             }
             _ => (),
         }
@@ -261,14 +263,19 @@ impl<T: Sender + 'static, S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer
     }
 }
 
-fn create_scenario_span<S: for<'a> LookupSpan<'a>>(attr: &span::Attributes, span: SpanRef<S>) {
+fn create_scenario_span<S: for<'a> LookupSpan<'a>>(
+    attr: &span::Attributes,
+    span: SpanRef<S>,
+) -> usize {
     let mut visitor = ScenarioData {
         id: usize::MAX,
         executor_timings: HashMap::default(),
     };
     attr.values().record(&mut visitor);
+    let id = visitor.id;
     let mut extentions = span.extensions_mut();
     extentions.insert(visitor);
+    id
 }
 
 fn create_exec_span<'a, S: LookupSpan<'a>>(
