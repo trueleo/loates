@@ -40,8 +40,7 @@ where
 ///
 /// ### Generic types and their constraints
 ///
-/// - `Args` must implement the [Extractor] trait and is `Send`.
-/// - `U` must be a User type and must have a lifetime bound of `'a`.
+/// - `U` must be a User type and must have a lifetime bound of datastore `'a`.
 #[async_trait::async_trait]
 pub trait AsyncUserBuilder<'a>: Sync {
     type Output: User + 'a;
