@@ -11,7 +11,6 @@ use tracing_subscriber::Registry;
 
 struct MyUser {}
 
-#[async_trait::async_trait]
 impl User for MyUser {
     async fn call(&mut self) -> UserResult {
         // In each iteration get the next string

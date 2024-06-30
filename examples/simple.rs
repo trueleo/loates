@@ -9,7 +9,6 @@ struct MyUser<Iter> {
     post_content: Iter,
 }
 
-#[async_trait::async_trait]
 impl<'a, Iter> User for MyUser<Iter>
 where
     Iter: Iterator<Item = &'a String> + Send,

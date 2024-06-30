@@ -18,12 +18,10 @@ use crate::{data::RuntimeDataStore, error::Error, UserResult};
 /// A concrete implementation of the `User` trait can capture arguments and reference data from higher layers,
 /// such as the [RuntimeDataStore](crate::data::RuntimeDataStore) defined in the scenario or in its executor.
 
-#[async_trait::async_trait]
 pub trait User: Send {
-    async fn call(&mut self) -> UserResult;
+    fn call(&mut self) -> impl std::future::Future<Output = UserResult> + std::marker::Send;
 }
 
-#[async_trait::async_trait]
 impl<F, Fut> User for F
 where
     F: FnMut() -> Fut + Send,
@@ -75,7 +73,6 @@ mod tests {
         s: &'a str,
     }
 
-    #[async_trait::async_trait]
     impl<'a> User for BorrowUser<'a> {
         async fn call(&mut self) -> UserResult {
             Ok(())
