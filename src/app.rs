@@ -99,7 +99,7 @@ impl Scenario {
         Self { name, execs }
     }
 
-    fn exec_names(&self) -> impl Iterator<Item = String> + '_ {
+    pub fn exec_names(&self) -> impl Iterator<Item = String> + '_ {
         self.execs.iter().map(|x| x.config.to_string())
     }
 }

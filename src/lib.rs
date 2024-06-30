@@ -146,8 +146,11 @@ pub mod prelude {
     pub use macro_rules_attribute::apply;
 }
 
+#[allow(unused)]
 use tokio::sync::mpsc::unbounded_channel as channel;
+#[allow(unused)]
 use tokio::sync::mpsc::UnboundedReceiver as Receiver;
+#[allow(unused)]
 use tokio::sync::mpsc::UnboundedSender as Sender;
 
 const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
