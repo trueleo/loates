@@ -10,9 +10,7 @@ use std::{
 
 use futures::Future;
 
-use crate::error::Error;
-
-/// RuntimeDataSources are used to store data generated at runtime for Execution and Scenarios.
+/// RuntimeDataSources are used to store data generated at runtime for Execution.
 #[derive(Debug, Default)]
 pub struct RuntimeDataStore(HashMap<TypeId, Box<dyn Any + Send + Sync>>);
 
@@ -71,6 +69,7 @@ where
     }
 }
 
+/*
 /// Implemented on Types that
 pub trait Extractor<'a>: Sized {
     fn from_runtime(runtime: &'a RuntimeDataStore) -> Result<Self, Error>;
@@ -127,3 +126,5 @@ impl_extractor! { A B C D E F G H I J K L M }
 impl_extractor! { A B C D E F G H I J K L M N }
 impl_extractor! { A B C D E F G H I J K L M N O }
 impl_extractor! { A B C D E F G H I J K L M N O P }
+
+ */
