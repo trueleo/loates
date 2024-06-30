@@ -69,6 +69,19 @@ where
     }
 }
 
+#[macro_export]
+macro_rules! boxed_future {
+    (
+        $(#[$meta:meta])*
+        async fn $fn_name:ident($arg_name:ident: &mut RuntimeDataStore) $body:block
+    ) => {
+        $(#[$meta])*
+        fn $fn_name($arg_name: &mut RuntimeDataStore) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send +'_>> {
+            Box::pin(async move { $body })
+        }
+    };
+}
+
 /*
 /// Implemented on Types that
 pub trait Extractor<'a>: Sized {
@@ -83,18 +96,6 @@ impl<'a, T: 'static> Extractor<'a> for &'a T {
     }
 }
 
-#[macro_export]
-macro_rules! boxed_future {
-    (
-        $(#[$meta:meta])*
-        async fn $fn_name:ident($arg_name:ident: &mut RuntimeDataStore) $body:block
-    ) => {
-        $(#[$meta])*
-        fn $fn_name($arg_name: &mut RuntimeDataStore) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send +'_>> {
-            Box::pin(async move { $body })
-        }
-    };
-}
 
 macro_rules! impl_extractor {
     {$($param:ident)*} => {
