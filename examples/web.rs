@@ -1,11 +1,8 @@
 use std::time::Duration;
 
 use rusher::client::reqwest::Client;
-use rusher::data::RuntimeDataStore;
 use rusher::error::Error;
-use rusher::logical::{ExecutionPlan, Executor, Scenario};
-use rusher::runner::Runner;
-use rusher::{apply, User};
+use rusher::prelude::*;
 
 struct MyUser<Iter> {
     client: Client,
@@ -17,7 +14,7 @@ impl<'a, Iter> User for MyUser<Iter>
 where
     Iter: Iterator<Item = &'a String> + Send,
 {
-    async fn call(&mut self) -> Result<(), Error> {
+    async fn call(&mut self) -> UserResult {
         // In each iteration get the next string
         let body = self.post_content.next().unwrap().to_string();
         let res = self

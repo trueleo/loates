@@ -1,12 +1,10 @@
 use std::time::Duration;
 
-use rusher::data::RuntimeDataStore;
 use rusher::error::Error;
-use rusher::logical::{ExecutionPlan, Executor, Scenario};
-use rusher::runner::Runner;
+use rusher::prelude::*;
+
 use rusher::tracing::message::Message;
 use rusher::tracing::TracerLayer;
-use rusher::User;
 // use tracing_subscriber::fmt::format::{format, FmtSpan};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Registry;
@@ -15,7 +13,7 @@ struct MyUser {}
 
 #[async_trait::async_trait]
 impl User for MyUser {
-    async fn call(&mut self) -> Result<(), Error> {
+    async fn call(&mut self) -> UserResult {
         // In each iteration get the next string
         let res = rusher::client::reqwest::Client::new()
             .post("https://httpbin.org/anything")
@@ -51,7 +49,7 @@ async fn main() {
     //     .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
     //     .init();
 
-    let (tx, mut rx) = rusher::channel();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
     let tracer = TracerLayer::new(tx);
     tracing::subscriber::set_global_default(Registry::default().with(tracer)).unwrap();

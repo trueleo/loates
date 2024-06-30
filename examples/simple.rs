@@ -1,11 +1,8 @@
 use std::time::Duration;
 
 use rusher::client::reqwest::Client;
-use rusher::data::RuntimeDataStore;
 use rusher::error::Error;
-use rusher::logical::{ExecutionPlan, Executor, Scenario};
-use rusher::runner::Runner;
-use rusher::{apply, User};
+use rusher::prelude::*;
 
 struct MyUser<Iter> {
     client: Client,
