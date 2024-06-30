@@ -81,8 +81,8 @@ where
 mod tests {
     use crate::{
         data::RuntimeDataStore,
-        user::{AsyncFnBuilder, AsyncUserBuilder},
-        User, UserResult,
+        user::{AsyncFnBuilder, AsyncUserBuilder, User},
+        UserResult,
     };
 
     #[allow(dead_code)]

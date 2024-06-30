@@ -12,8 +12,8 @@ use crate::{
     data::RuntimeDataStore,
     error::Error,
     logical::{self, Rate},
-    user::AsyncUserBuilder,
-    User, UserResult, CRATE_NAME, SPAN_TASK,
+    user::{AsyncUserBuilder, User},
+    UserResult, CRATE_NAME, SPAN_TASK,
 };
 
 type ExecutorTask<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
