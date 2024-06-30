@@ -41,7 +41,6 @@ where
     }
 }
 
-#[apply(rusher::boxed_future)]
 async fn datastore(store: &mut RuntimeDataStore) {
     let data = vec!["a".to_string(), "b".to_string(), "c".to_string()];
     store.insert(data);

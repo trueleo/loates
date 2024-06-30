@@ -5,10 +5,9 @@
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
-    pin::Pin,
 };
 
-use futures::Future;
+use async_fn_traits::AsyncFn1;
 
 /// RuntimeDataSources are used to store data generated at runtime for Execution.
 #[derive(Debug, Default)]
@@ -62,24 +61,12 @@ pub trait DatastoreModifier: Sync {
 #[async_trait::async_trait]
 impl<F> DatastoreModifier for F
 where
-    F: for<'a> Fn(&'a mut RuntimeDataStore) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> + Sync,
+    F: for<'a> AsyncFn1<&'a mut RuntimeDataStore, Output = ()> + Sync,
+    for<'b> <F as AsyncFn1<&'b mut RuntimeDataStore>>::OutputFuture: Send,
 {
     async fn init_store(&self, store: &mut RuntimeDataStore) {
         self(store).await
     }
-}
-
-#[macro_export]
-macro_rules! boxed_future {
-    (
-        $(#[$meta:meta])*
-        async fn $fn_name:ident($arg_name:ident: &mut RuntimeDataStore) $body:block
-    ) => {
-        $(#[$meta])*
-        fn $fn_name($arg_name: &mut RuntimeDataStore) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send +'_>> {
-            Box::pin(async move { $body })
-        }
-    };
 }
 
 /*
