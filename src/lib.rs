@@ -124,7 +124,6 @@ pub mod app;
 #[cfg(feature = "reqwest")]
 pub mod client;
 
-pub mod config;
 pub mod data;
 pub mod error;
 pub mod executor;
@@ -133,17 +132,23 @@ pub mod runner;
 pub mod tracing;
 pub mod user;
 
-pub use crate::logical::Scenario;
-pub use runner::Config;
-pub use runner::Runner;
-pub use user::User;
-
 pub type UserResult = Result<(), crate::error::Error>;
 
-pub use macro_rules_attribute::apply;
-pub use tokio::sync::mpsc::unbounded_channel as channel;
-pub use tokio::sync::mpsc::UnboundedReceiver as Receiver;
-pub use tokio::sync::mpsc::UnboundedSender as Sender;
+pub mod prelude {
+    pub use crate::data::RuntimeDataStore;
+    pub use crate::logical::ExecutionPlan;
+    pub use crate::logical::Executor;
+    pub use crate::logical::Scenario;
+    pub use crate::runner::Config;
+    pub use crate::runner::Runner;
+    pub use crate::user::User;
+    pub use crate::UserResult;
+    pub use macro_rules_attribute::apply;
+}
+
+use tokio::sync::mpsc::unbounded_channel as channel;
+use tokio::sync::mpsc::UnboundedReceiver as Receiver;
+use tokio::sync::mpsc::UnboundedSender as Sender;
 
 const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
 pub const USER_TASK: &str = "user_event";
