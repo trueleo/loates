@@ -1,10 +1,8 @@
 use std::{borrow::Cow, fmt::Write, time::Duration};
 
 use crate::{
-    data::DatastoreModifier,
-    executor::DataExecutor,
-    runner::ExecutionRuntimeCtx,
-    user::{AsyncFnBuilder, AsyncUserBuilder},
+    data::DatastoreModifier, executor::DataExecutor, runner::ExecutionRuntimeCtx,
+    user::AsyncUserBuilder,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -152,15 +150,10 @@ impl ExecutionPlan<'static, ()> {
         }
     }
 
-    pub fn with_user_builder<'env, F>(
-        self,
-        user_builder: F,
-    ) -> ExecutionPlan<'env, AsyncFnBuilder<F>>
+    pub fn with_user_builder<'env, F>(self, user_builder: F) -> ExecutionPlan<'env, F>
     where
-        F: Into<AsyncFnBuilder<F>> + Sync + 'env,
-        AsyncFnBuilder<F>: for<'a> AsyncUserBuilder<'a>,
+        F: Sync + 'env + for<'a> AsyncUserBuilder<'a>,
     {
-        let user_builder: AsyncFnBuilder<F> = user_builder.into();
         ExecutionPlan::<'env, _>::new(
             self.label,
             user_builder,

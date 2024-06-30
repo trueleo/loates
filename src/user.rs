@@ -48,23 +48,8 @@ pub trait AsyncUserBuilder<'a>: Sync {
     async fn build(&self, store: &'a RuntimeDataStore) -> Result<Self::Output, Error>;
 }
 
-pub struct AsyncFnBuilder<F> {
-    inner: F,
-}
-
-impl<'a, F> From<F> for AsyncFnBuilder<F>
-where
-    F: async_fn_traits::AsyncFn1<&'a RuntimeDataStore> + Sync,
-    <F as async_fn_traits::AsyncFn1<&'a RuntimeDataStore>>::Output: User + 'a,
-    <F as async_fn_traits::AsyncFn1<&'a RuntimeDataStore>>::OutputFuture: Send,
-{
-    fn from(value: F) -> Self {
-        Self { inner: value }
-    }
-}
-
 #[async_trait::async_trait]
-impl<'a, F> AsyncUserBuilder<'a> for AsyncFnBuilder<F>
+impl<'a, F> AsyncUserBuilder<'a> for F
 where
     F: async_fn_traits::AsyncFn1<&'a RuntimeDataStore> + Sync,
     <F as async_fn_traits::AsyncFn1<&'a RuntimeDataStore>>::Output: User + 'a,
@@ -73,7 +58,7 @@ where
     type Output = <F as async_fn_traits::AsyncFn1<&'a RuntimeDataStore>>::Output;
 
     async fn build(&self, store: &'a RuntimeDataStore) -> Result<Self::Output, Error> {
-        Ok((self.inner)(store).await)
+        Ok((self)(store).await)
     }
 }
 
@@ -81,7 +66,7 @@ where
 mod tests {
     use crate::{
         data::RuntimeDataStore,
-        user::{AsyncFnBuilder, AsyncUserBuilder, User},
+        user::{AsyncUserBuilder, User},
         UserResult,
     };
 
@@ -107,8 +92,6 @@ mod tests {
             BorrowUser { s: s.as_str() }
         }
 
-        let a: AsyncFnBuilder<_> = (user_builder).into();
-
-        let _ = futures::executor::block_on(AsyncUserBuilder::build(&a, &store));
+        let _ = futures::executor::block_on(AsyncUserBuilder::build(&user_builder, &store));
     }
 }
