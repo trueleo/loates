@@ -157,7 +157,7 @@ pub mod client;
 
 pub mod data;
 pub mod error;
-pub mod executor;
+mod executor;
 pub mod logical;
 pub mod runner;
 pub mod tracing;
