@@ -2,8 +2,11 @@
 inspired by [grafana k6](https://k6.io) and powered by
 [`tracing`](https://docs.rs/tracing/latest/tracing/) crate.
 
-Rusher is agnostic over what a user is suppose to do. Metrics for a test is generated via use of tracing span and events inside of a user call, more about this is documented below.
-These spans and events are collected via a tracing subscriber. For common usecases this crate provides wrapper types over popular async clients which emit proper tracing spans and events.
+Although this framework covers common usecases like HTTP load testing,
+it is usecase agnostic. Metrics for a test is generated via use of
+tracing span and events inside of a user call, more about this is documented
+in section [generating custom metrics](#custom-metrics). These spans and
+events are collected via a tracing subscriber.
 
 # Concepts
 
@@ -37,7 +40,6 @@ struct MyUser<Iter> {
     post_content: Iter,
 }
 
-#[async_trait::async_trait]
 impl<'a, Iter> User for MyUser<Iter>
 where
     Iter: Iterator<Item = &'a String> + Send,
@@ -69,7 +71,6 @@ where
     }
 }
 
-#[apply(rusher::boxed_future)]
 async fn datastore(store: &mut RuntimeDataStore) {
     let data = vec!["a".to_string(), "b".to_string(), "c".to_string()];
     store.insert(data);
