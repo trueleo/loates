@@ -144,7 +144,7 @@ impl Execution<'static, ()> {
 
     pub fn with_user_builder<'env, F>(self, user_builder: F) -> Execution<'env, F>
     where
-        F: Sync + 'env + for<'a> AsyncUserBuilder<'a>,
+        F: for<'a> AsyncUserBuilder<'a> + 'env,
     {
         Execution::<'env, _> {
             user_builder,
@@ -154,7 +154,10 @@ impl Execution<'static, ()> {
     }
 }
 
-impl<'env, Ub> Execution<'env, Ub> {
+impl<'env, Ub> Execution<'env, Ub>
+where
+    Ub: for<'a> AsyncUserBuilder<'a> + 'env,
+{
     pub fn with_data<T: DatastoreModifier + 'env>(mut self, f: T) -> Self {
         self.datastore_modifiers
             .push(Box::new(f) as Box<dyn DatastoreModifier + 'env>);
@@ -164,6 +167,10 @@ impl<'env, Ub> Execution<'env, Ub> {
     pub fn with_executor(mut self, executor: Executor) -> Self {
         self.executor = executor;
         self
+    }
+
+    pub fn to_scenario(self, label: impl Into<Cow<'static, str>>) -> Scenario<'env> {
+        Scenario::new(label, self)
     }
 }
 
