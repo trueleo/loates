@@ -180,12 +180,12 @@ impl<'env> Runner<'env> {
     }
 }
 
-pub struct LogicalContext<'env> {
+struct LogicalContext<'env> {
     scenarios: Vec<logical::Scenario<'env>>,
 }
 
 #[derive(Debug, Default)]
-pub struct ExecutionRuntimeCtx {
+pub(crate) struct ExecutionRuntimeCtx {
     datastore: RuntimeDataStore,
 }
 
