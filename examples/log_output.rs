@@ -18,8 +18,7 @@ impl User for MyUser {
             .post("https://httpbin.org/anything")
             .body("abc")
             .send()
-            .await
-            .map_err(|err| Error::GenericError(err.into()))?;
+            .await?;
 
         if !res.status().is_success() {
             let body = res
