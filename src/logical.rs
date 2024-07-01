@@ -87,7 +87,7 @@ impl std::fmt::Display for Executor {
 }
 
 #[async_trait::async_trait]
-pub trait ExecutionProvider {
+pub(crate) trait ExecutionProvider {
     fn config(&self) -> &Executor;
     async fn execution<'a>(
         &'a self,
@@ -101,17 +101,20 @@ pub struct Scenario<'env> {
 }
 
 impl<'env> Scenario<'env> {
-    pub fn new<T: ExecutionProvider + 'env>(
-        label: impl Into<Cow<'static, str>>,
-        execution: T,
-    ) -> Self {
+    pub fn new<Ub>(label: impl Into<Cow<'static, str>>, execution: Execution<'env, Ub>) -> Self
+    where
+        Ub: for<'a> AsyncUserBuilder<'a> + 'env,
+    {
         Self {
             label: label.into(),
             execution_provider: vec![Box::new(execution)],
         }
     }
 
-    pub fn with_executor<T: ExecutionProvider + 'env>(mut self, execution: T) -> Self {
+    pub fn with_executor<Ub>(mut self, execution: Execution<'env, Ub>) -> Self
+    where
+        Ub: for<'a> AsyncUserBuilder<'a> + 'env,
+    {
         self.execution_provider.push(Box::new(execution));
         self
     }
