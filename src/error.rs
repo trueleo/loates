@@ -25,3 +25,10 @@ impl Error {
         Self::TerminationError(anyhow!(err.into()))
     }
 }
+
+#[cfg(feature = "reqwest")]
+impl From<reqwest::Error> for Error {
+    fn from(value: reqwest::Error) -> Self {
+        Error::GenericError(anyhow::Error::from(value))
+    }
+}
