@@ -14,6 +14,7 @@ pub enum Error {
 }
 
 impl Error {
+    /// Error is of variant TerminationError
     pub fn is_termination_err(&self) -> bool {
         matches!(self, Error::TerminationError(_))
     }
