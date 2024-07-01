@@ -57,12 +57,12 @@ async fn user_builder(runtime: &RuntimeDataStore) -> impl User + '_ {
 
 #[tokio::main]
 async fn main() {
-    let execution_once = ExecutionPlan::builder()
+    let execution_once = Execution::builder()
         .with_user_builder(user_builder)
         .with_data(datastore)
         .with_executor(Executor::Once);
 
-    let execution_shared = ExecutionPlan::builder()
+    let execution_shared = Execution::builder()
         .with_user_builder(user_builder)
         .with_data(datastore)
         .with_executor(Executor::Shared {

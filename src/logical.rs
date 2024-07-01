@@ -117,53 +117,44 @@ impl<'env> Scenario<'env> {
     }
 }
 
-pub struct ExecutionPlan<'env, Ub> {
-    label: Option<Cow<'static, str>>,
+pub struct Execution<'env, Ub> {
     user_builder: Ub,
     datastore_modifiers: Vec<Box<dyn DatastoreModifier + 'env>>,
     executor: Executor,
 }
 
-impl<'env, Ub> ExecutionPlan<'env, Ub> {
-    fn new(
-        label: Option<Cow<'static, str>>,
-        user_builder: Ub,
-        datastore_modifiers: Vec<Box<dyn DatastoreModifier>>,
-        executor: Executor,
-    ) -> Self {
+impl<'env, Ub> Execution<'env, Ub> {
+    pub fn new(user_builder: Ub, executor: Executor) -> Self {
         Self {
-            label,
             user_builder,
-            datastore_modifiers,
+            datastore_modifiers: vec![],
             executor,
         }
     }
 }
 
-impl ExecutionPlan<'static, ()> {
-    pub fn builder() -> ExecutionPlan<'static, ()> {
+impl Execution<'static, ()> {
+    pub fn builder() -> Execution<'static, ()> {
         Self {
-            label: None,
             user_builder: (),
             datastore_modifiers: Vec::new(),
             executor: Executor::Once,
         }
     }
 
-    pub fn with_user_builder<'env, F>(self, user_builder: F) -> ExecutionPlan<'env, F>
+    pub fn with_user_builder<'env, F>(self, user_builder: F) -> Execution<'env, F>
     where
         F: Sync + 'env + for<'a> AsyncUserBuilder<'a>,
     {
-        ExecutionPlan::<'env, _>::new(
-            self.label,
+        Execution::<'env, _> {
             user_builder,
-            self.datastore_modifiers,
-            self.executor,
-        )
+            executor: self.executor,
+            datastore_modifiers: self.datastore_modifiers,
+        }
     }
 }
 
-impl<'env, Ub> ExecutionPlan<'env, Ub> {
+impl<'env, Ub> Execution<'env, Ub> {
     pub fn with_data<T: DatastoreModifier + 'env>(mut self, f: T) -> Self {
         self.datastore_modifiers
             .push(Box::new(f) as Box<dyn DatastoreModifier + 'env>);
@@ -177,7 +168,7 @@ impl<'env, Ub> ExecutionPlan<'env, Ub> {
 }
 
 #[async_trait::async_trait]
-impl<'env, Ub> ExecutionProvider for ExecutionPlan<'env, Ub>
+impl<'env, Ub> ExecutionProvider for Execution<'env, Ub>
 where
     Ub: for<'a> AsyncUserBuilder<'a>,
 {

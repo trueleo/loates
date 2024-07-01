@@ -57,7 +57,7 @@ async fn user_builder(runtime: &RuntimeDataStore) -> impl User + '_ {
 
 #[tokio::main]
 async fn main() {
-    let execution_ramping_user = ExecutionPlan::builder()
+    let execution_ramping_user = Execution::builder()
         .with_user_builder(user_builder)
         .with_data(datastore)
         .with_executor(Executor::RampingUser {
@@ -65,14 +65,12 @@ async fn main() {
             stages: vec![(1, Duration::from_secs(10)), (1, Duration::from_secs(3))],
         });
 
-    let scenario1 = Scenario::new("scene1".to_string(), execution_ramping_user);
+    let scenario1 = Scenario::new("scene1", execution_ramping_user);
 
-    let execution_once = ExecutionPlan::builder()
-        .with_user_builder(user_builder)
-        .with_data(datastore)
-        .with_executor(Executor::Once);
-
-    let scenario2 = Scenario::new("scene2".to_string(), execution_once);
+    let scenario2 = Scenario::new(
+        "scene2",
+        Execution::new(user_builder, Executor::Once).with_data(datastore),
+    );
 
     let scenarios = vec![scenario1, scenario2];
 

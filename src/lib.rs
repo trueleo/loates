@@ -137,7 +137,7 @@ pub type UserResult = Result<(), crate::error::Error>;
 
 pub mod prelude {
     pub use crate::data::RuntimeDataStore;
-    pub use crate::logical::ExecutionPlan;
+    pub use crate::logical::Execution;
     pub use crate::logical::Executor;
     pub use crate::logical::Scenario;
     pub use crate::runner::Config;

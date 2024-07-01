@@ -52,7 +52,7 @@ async fn main() {
     let tracer = TracerLayer::new(tx);
     tracing::subscriber::set_global_default(Registry::default().with(tracer)).unwrap();
 
-    let execution = ExecutionPlan::builder()
+    let execution = Execution::builder()
         .with_user_builder(user_builder)
         .with_executor(Executor::PerUser {
             users: 1,
