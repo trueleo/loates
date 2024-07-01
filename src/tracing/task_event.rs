@@ -205,7 +205,7 @@ impl tracing::field::Visit for TaskSpanData {
     }
 }
 
-#[cfg(feature = "web")]
+#[cfg(feature = "serde")]
 fn serialize_ordered_float<S: serde::Serializer>(
     x: &OrderedFloat<f64>,
     s: S,

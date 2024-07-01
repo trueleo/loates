@@ -50,7 +50,7 @@ pub enum Message {
     End,
 }
 
-#[cfg(feature = "web")]
+#[cfg(feature = "serde")]
 pub fn serialize_to_rfc3339_opts<S: serde::Serializer>(
     t: &DateTime<Utc>,
     s: S,
