@@ -16,7 +16,7 @@ use crate::{data::RuntimeDataStore, error::Error, UserResult};
 ///
 /// ### Note
 /// A concrete implementation of the `User` trait can capture arguments and reference data from higher layers,
-/// such as the [RuntimeDataStore](crate::data::RuntimeDataStore) defined in the scenario or in its executor.
+/// such as the [RuntimeDataStore] defined in the scenario or in its executor.
 
 pub trait User: Send {
     fn call(&mut self) -> impl std::future::Future<Output = UserResult> + std::marker::Send;

@@ -2,10 +2,13 @@ use std::borrow::Cow;
 
 use anyhow::anyhow;
 
+/// Error type for user task
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// If a user task returns this error variant, it means that the user has reached a critical failure and wants the test to be stopped immediately.
     #[error(transparent)]
     TerminationError(anyhow::Error),
+    /// Error variant which should be shown in the UI
     #[error(transparent)]
     GenericError(#[from] anyhow::Error),
 }

@@ -29,7 +29,6 @@ tracing-subscriber = { version = "0.3", features = [
 ] }
 tracing = "0.1.40"
 tdigest = "0.2.3"
-macro_rules_attribute = "0.2.0"
 async_fn_traits = "0.1.1"
 http-body = "1.0.0"
 itertools = "0.13"

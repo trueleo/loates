@@ -5,7 +5,7 @@ inspired by [grafana k6](https://k6.io) and powered by
 Although this framework covers common usecases like HTTP load testing,
 it is usecase agnostic. Metrics for a test is generated via use of
 tracing span and events inside of a user call, more about this is documented
-in section [generating custom metrics](#custom-metrics). These spans and
+in section [generating custom metrics](#emitting-metrics). These spans and
 events are collected via a tracing subscriber.
 
 # Concepts
@@ -28,11 +28,12 @@ Users of this framework are suppose to implement [`User`](user::User) trait for 
 
 
 # Example
+More examples are available in the [github repo](https://github.com/trueleo/rusher/examples)
+
 ```no_run
 use std::time::Duration;
 
 use rusher::client::reqwest::Client;
-use rusher::error::Error;
 use rusher::prelude::*;
 
 struct MyUser<Iter> {
@@ -52,21 +53,8 @@ where
             .post("https://httpbin.org/anything")
             .body(body)
             .send()
-            .await
-            .map_err(|err| Error::GenericError(err.into()))?;
-
-        if !res.status().is_success() {
-            let body = res
-                .bytes()
-                .await
-                .map_err(|err| Error::TerminationError(err.into()))?;
-
-            let err = String::from_utf8_lossy(&body).to_string();
-            return Err(Error::termination(err));
-        }
-
+            .await?;
         tokio::time::sleep(Duration::from_millis(500)).await;
-
         Ok(())
     }
 }
@@ -89,34 +77,76 @@ async fn user_builder(runtime: &RuntimeDataStore) -> impl User + '_ {
 
 #[tokio::main]
 async fn main() {
-    let execution_ramping_user = ExecutionPlan::builder()
-        .with_user_builder(user_builder)
-        .with_data(datastore)
-        .with_executor(Executor::RampingUser {
-            pre_allocate_users: 10,
-            stages: vec![(1, Duration::from_secs(10)), (1, Duration::from_secs(3))],
-        });
-
-    let scenario1 = Scenario::new("scene1".to_string(), execution_ramping_user);
-
-    let execution_once = ExecutionPlan::builder()
+    let exec = Execution::builder()
         .with_user_builder(user_builder)
         .with_data(datastore)
         .with_executor(Executor::Once);
 
-    let scenario2 = Scenario::new("scene2".to_string(), execution_once);
-
-    let scenarios = vec![scenario1, scenario2];
+    let scenario1 = Scenario::new("scene1", exec);
+    let scenarios = vec![scenario1];
 
     Runner::new(scenarios).enable_web(true).run().await.unwrap();
 }
+
 ```
 
-### Features
+# Features
 - `tui` Enables tui mode, allowing for user to look at live feed of execution in terminal.
 - `web` Enables web mode which contains a simple axum server along with a inbuilt UI for looking at updates.
 - `serde` - Enable serialization with serde.
 - `reqwest` - Wrapper client type for reqwest.
+
+# Architecture
+
+```text
+                                      ┌───────────────────────────────────────────────┐
+                                      │                    Runner                     │
+                                      │  ┌──────────┐ ┌──────────┐ ┌──────────┐       │
+                                      │  │  scene1  │ │  scene2  │ │  scene3  │ ....  │
+     logical                          │  └──────────┘ └──────────┘ └──────────┘       │
+    ┌─────────────────────────┐       │        ▼                                      │
+    │Scenarios                │       │ ┌───────────────────┬───────────┐ ┌───────────┤
+    │ - Scenario              │       │ │ Executor          │ datastore │ │           │
+    │    - Executors          ├──────►│ │                   └─────▲─────┤ │           │
+    │    - UserBuilder        │  run  │ │       ┌───────┬────────┬┘     │ │           │
+    │    - DataStoreModifiers │       │ ├───────┴──┬────┴─────┬──┴──────┤ │    .....  │
+    └─────────────────────────┘       │ │          │          │         │ │           │
+                                      │ │  user    │  user    │  user   │ │           │
+                                      │ │          │          │         │ │           │
+                                      │ └──────────┴──────────┴─────────┘ └───────────┤
+                                      └───────────────────────────────────────────────┘
+                               traces,│
+                               events │   ┌────────────┐         ┌─────────┐        ┌────┬───────┐
+                                      └──►│ TRACING    ├────────►│ APP     │        │ UI ├───────┤
+                                          │ SUBSCRIBER │ message │ STATE   ├──────► │    │METRICS│
+                                          └────────────┘         └─────────┘        │    │       │
+                                                                                    └────┴───────┘
+```
+# Tracing
+
+Rusher relies heavily on usage of tracing and tracing-subscriber to emit and
+collect flow of execution. Even the metrics that show up when a test
+runs is generated through crafted spans and events.
+
+## Emitting metrics
+To emit a custom metric from within a user task, use [`event`](https://docs.rs/tracing/0.1.40/tracing/index.html#events-1) macro.
+* The event name must be followed by a `.` dot and a metric type.
+* `target` for this event must to set to the constant [`USER_TASK`]
+* `value` field contains the value that you want to record.
+
+any other fields in the event is captures as the attributes for this metric which also includes all parent span's attributes.
+
+```no_run
+event!(name: "failure.counter", target: USER_TASK, Level::INFO, value = 1u64);
+```
+
+There are three type of event signals that you can emit from within a user's task.
+* `counter` - Sums all values emitted during a run and shows a counter. only accepts `u64`
+* `gauge` - Shows timeseries value over fixed sample range as graph. Permitted types are `u64`, `i64`, `f64` or Durations as nanos (`u128`)
+* `histogram` - Captures *p50*, *p90*, *p95*, *p99* values from sampled values. Permitted types are `f64` or Duration as nanos (`u128`)
+
+Any span(s) inside of a user task is converted to a histogram metric which would track duration of its execution as its value.
+
 */
 
 #[cfg(any(feature = "tui", feature = "web"))]
@@ -144,7 +174,6 @@ pub mod prelude {
     pub use crate::runner::Runner;
     pub use crate::user::User;
     pub use crate::UserResult;
-    pub use macro_rules_attribute::apply;
 }
 
 #[allow(unused)]
