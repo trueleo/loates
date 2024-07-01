@@ -205,8 +205,6 @@ impl ExecutionRuntimeCtx {
     }
 }
 
-pub struct Config {}
-
 async fn has_user_terminated<'s>(
     mut user_result_rx: tokio::sync::mpsc::UnboundedReceiver<Result<(), crate::error::Error>>,
 ) -> bool {

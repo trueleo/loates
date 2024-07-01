@@ -170,7 +170,6 @@ pub mod prelude {
     pub use crate::logical::Execution;
     pub use crate::logical::Executor;
     pub use crate::logical::Scenario;
-    pub use crate::runner::Config;
     pub use crate::runner::Runner;
     pub use crate::user::User;
     pub use crate::UserResult;
