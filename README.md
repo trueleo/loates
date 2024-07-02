@@ -33,19 +33,15 @@ Instead of being a tool like k6 which runs javascript for you, rusher is a simpl
 ```rust
 use std::time::Duration;
 
-use reqwest::Client;
-use rusher::data::RuntimeDataStore;
+use rusher::client::reqwest::Client;
 use rusher::error::Error;
-use rusher::logical::{ExecutionPlan, Executor, Scenario};
-use rusher::runner::Runner;
-use rusher::{apply, User};
+use rusher::prelude::*;
 
 struct MyUser<Iter> {
     client: Client,
     post_content: Iter,
 }
 
-#[async_trait::async_trait]
 impl<'a, Iter> User for MyUser<Iter>
 where
     Iter: Iterator<Item = &'a String> + Send,
@@ -58,8 +54,7 @@ where
             .post("https://httpbin.org/anything")
             .body(body)
             .send()
-            .await
-            .map_err(|err| Error::GenericError(err.into()))?;
+            .await?;
 
         if !res.status().is_success() {
             let body = res
@@ -71,11 +66,12 @@ where
             return Err(Error::termination(err));
         }
 
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
         Ok(())
     }
 }
 
-#[apply(rusher::boxed_future)]
 async fn datastore(store: &mut RuntimeDataStore) {
     let data = vec!["a".to_string(), "b".to_string(), "c".to_string()];
     store.insert(data);
@@ -94,21 +90,22 @@ async fn user_builder(runtime: &RuntimeDataStore) -> impl User + '_ {
 
 #[tokio::main]
 async fn main() {
-    let execution = ExecutionPlan::builder()
+    let execution_once = Execution::builder()
         .with_user_builder(user_builder)
         .with_data(datastore)
         .with_executor(Executor::Once);
 
-    let execution_once = ExecutionPlan::builder()
+    let execution_shared = Execution::builder()
         .with_user_builder(user_builder)
         .with_data(datastore)
         .with_executor(Executor::Shared {
             users: 2,
-            iterations: 3,
-            duration: Duration::from_secs(4),
+            iterations: 1000,
+            duration: Duration::from_secs(100),
         });
 
-    let scenario = Scenario::new("scene1".to_string(), execution).with_executor(execution_once);
+    let scenario =
+        Scenario::new("scene1".to_string(), execution_shared).with_executor(execution_once);
     let scenarios = vec![scenario];
 
     Runner::new(scenarios).enable_tui(true).run().await.unwrap();
