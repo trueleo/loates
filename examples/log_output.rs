@@ -3,7 +3,7 @@ use std::time::Duration;
 use rusher::error::Error;
 use rusher::prelude::*;
 
-use rusher::tracing::message::Message;
+use rusher::tracing::Message;
 use rusher::tracing::TracerLayer;
 // use tracing_subscriber::fmt::format::{format, FmtSpan};
 use tracing_subscriber::layer::SubscriberExt;
