@@ -4,31 +4,23 @@ use metrics::MetricType;
 use ordered_float::OrderedFloat;
 use tracing::span::Id;
 
-/// During the execution, any span scope/event generated within task should be trimmed down to metrics.
-/// This is done to reduce the scope of the UI and enrich the user with important metrics about calls made within the user task.
-///
-/// The general semantics for now is as such
-///
-/// event!(LEVEL, "counter.name", value="", attributes*, ) is converted to following metrics
-/// `name_count{attributes} sum(value)`.
-///
-/// Similar stratergy is applied to other metric types
-///
-/// For any events within a span, attributes and name of the span are added as extra label for grouping the events.
-///
-/// Each span inherits all the attributes of the parent and each span is tracked for its duration and tracked in a histogram.
+pub(crate) mod metrics;
 
-/// Type to capture arbritary spans
-pub mod metrics;
-
+/// Key Value pair defining a label for a metric. For example - `("status", 200)`
 pub type Attribute = (&'static str, Value);
 
+/// A key identifying an observed metric related to this test.
+///
+/// They are guaranteed to be unique for each metric observed during runtime of an executor.  
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct MetricSetKey {
+    /// Name of the metric
     pub name: &'static str,
+    /// Type of the metric
     pub metric_type: MetricType,
+    /// Attributes related to this metric
     pub attributes: Vec<Attribute>,
 }
 
@@ -57,7 +49,7 @@ impl MetricSet {
     }
 }
 
-/// Represents scalar values that are allowed to be in a user eventErrorVisitor's attribute set.
+/// Represents scalar values that are allowed to be in a user event's attribute set.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(untagged))]

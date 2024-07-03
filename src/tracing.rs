@@ -1,5 +1,8 @@
-pub mod message;
-pub mod task_event;
+pub(crate) mod message;
+pub(crate) mod task_event;
+
+pub use message::Message;
+pub use task_event::{metrics::MetricType, metrics::MetricValue, Attribute, MetricSetKey};
 
 use std::{
     collections::HashMap,
@@ -9,8 +12,7 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use message::Message;
-use task_event::{metrics::MetricType, MetricSet, TaskEvent, TaskSpanData};
+use task_event::{MetricSet, TaskEvent, TaskSpanData};
 use tracing::{
     field::{Field, Visit},
     span::{self, Id},
@@ -116,6 +118,7 @@ impl Visit for ErrorVisitor {
     }
 }
 
+/// Trait for abstracting over sender type of a channel.
 pub trait Sender {
     fn send(&self, message: Message);
 }
@@ -132,7 +135,7 @@ impl Sender for tokio::sync::broadcast::Sender<Message> {
     }
 }
 
-// Tracing layer that tracks and generates message based on this crate's tracing events
+/// [Tracing subscriber layer](Layer) that tracks and generates [`Message`]s based on tracing events generated during a test.
 pub struct TracerLayer<T: Sender> {
     // current_scenario: Mutex<String>,
     stats_sender: T,
@@ -508,11 +511,7 @@ fn close_task_child_span<'a, S: Subscriber + for<'lookup> LookupSpan<'lookup>>(
         task_inner_span.start_time.elapsed().into(),
     );
 
-    let task_span = span
-        .scope()
-        .find(|x| x.metadata().name() == SPAN_EXEC)
-        .unwrap();
-    let task_span = ctx.span(&task_span.id()).unwrap();
+    let task_span = ctx.span(&task_inner_span.execution_span_id).unwrap();
     task_span
         .extensions()
         .get::<ExecutionData>()
