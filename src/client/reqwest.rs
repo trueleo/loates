@@ -4,7 +4,7 @@ use crate::USER_TASK;
 
 #[derive(Clone)]
 pub struct Client {
-    inner: reqwest::Client,
+    pub inner: reqwest::Client,
 }
 
 impl std::fmt::Debug for Client {
