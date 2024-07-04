@@ -214,7 +214,7 @@ impl<'env, Ub> Execution<'env, Ub>
 where
     Ub: for<'a> AsyncUserBuilder<'a> + 'env,
 {
-    /// Append a new datastore initializer to this execution. When perparing to run a scenario, this will be used to initialize [`RuntimeDataStore`] created for this execution.
+    /// Append a new datastore initializer to this execution. When perparing to run a scenario, this will be used to initialize [`RuntimeDataStore`](crate::data::RuntimeDataStore) created for this execution.
     pub fn with_data<T: DatastoreModifier + 'env>(mut self, f: T) -> Self {
         self.datastore_modifiers
             .push(Box::new(f) as Box<dyn DatastoreModifier + 'env>);

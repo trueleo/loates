@@ -149,22 +149,37 @@ Any span(s) inside of a user task is converted to a histogram metric which would
 
 */
 
+/// User Interfaces and state management for creating live view of execution.
 #[cfg(any(feature = "tui", feature = "web"))]
 pub mod app;
 
+/// Augmented wrapper types for popular crates.
 #[cfg(feature = "reqwest")]
 pub mod client;
 
+/// Data layer for shared data
 pub mod data;
+
+/// User error type
 pub mod error;
-mod executor;
+
+/// Create test scenarios
 pub mod logical;
+
+/// Running test scenarios
 pub mod runner;
+
+/// Trace execution of a test
 pub mod tracing;
+
+/// Traits for creating virtual users
 pub mod user;
+
+mod executor;
 
 pub type UserResult = Result<(), crate::error::Error>;
 
+/// Common imports for defining a test
 pub mod prelude {
     pub use crate::data::RuntimeDataStore;
     pub use crate::logical::Execution;
@@ -182,8 +197,10 @@ use tokio::sync::mpsc::UnboundedReceiver as Receiver;
 #[allow(unused)]
 use tokio::sync::mpsc::UnboundedSender as Sender;
 
-const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
+/// A const variable that can be used to define custom traces in your test. The tracing layer provided by this crate will ignore any events in user call that are not of this target.
 pub const USER_TASK: &str = "user_event";
+
+const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
 const SPAN_TASK: &str = "task";
 const SPAN_EXEC: &str = "execution";
 const SPAN_SCENARIO: &str = "scenario";
