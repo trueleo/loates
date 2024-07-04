@@ -2,6 +2,11 @@ use tracing::{event, field, span, Level};
 
 use crate::USER_TASK;
 
+/// An asynchronous Client to make Requests with.
+///
+/// This is a wrapper type over for reqwest Client made for convinience.
+/// If you are creating a custom client with [`reqwest::Client::builder()`],
+/// then use the [`new_with`](Self::new_with) method or call [`Into::into`]
 #[derive(Clone)]
 pub struct Client {
     pub inner: reqwest::Client,
@@ -13,12 +18,32 @@ impl std::fmt::Debug for Client {
     }
 }
 
+impl From<reqwest::Client> for Client {
+    fn from(value: reqwest::Client) -> Self {
+        Self { inner: value }
+    }
+}
+
+impl TryFrom<reqwest::ClientBuilder> for Client {
+    type Error = reqwest::Error;
+
+    fn try_from(value: reqwest::ClientBuilder) -> Result<Self, Self::Error> {
+        Ok(Self {
+            inner: value.build()?,
+        })
+    }
+}
+
 impl Client {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             inner: reqwest::Client::new(),
         }
+    }
+
+    pub fn new_with(client: reqwest::Client) -> Self {
+        Self { inner: client }
     }
 
     pub fn delete<U: reqwest::IntoUrl>(&self, url: U) -> RequestBuilder {
@@ -57,6 +82,7 @@ impl Client {
     }
 }
 
+/// Wrapper over [`reqwest::RequestBuilder`].
 #[must_use = "RequestBuilder does nothing until you 'send' it"]
 pub struct RequestBuilder {
     inner: reqwest::RequestBuilder,
@@ -90,26 +116,36 @@ impl RequestBuilder {
     pub async fn send(self) -> Result<reqwest::Response, reqwest::Error> {
         let (client, request) = self.inner.build_split();
         let request = request?;
-        let host = request.url().host();
-        let path = request.url().path();
-        let method = request.method();
-        let span =
-            span!(target: USER_TASK, Level::INFO, "reqwest", url = field::Empty, %path, %method);
-        let _t = span.enter();
-        if let Some(host) = host {
-            span.record("url", field::display(host));
-        }
-        use http_body::Body as _;
-        if let Some(size) = request.body().and_then(|x| x.size_hint().exact()) {
-            event!(name: "sent.gauge", target: USER_TASK, Level::INFO, value = size as f64);
-        }
-        drop(_t);
-        let resp = client.execute(request).await?;
-        let _t = span.enter();
-        if let Some(size) = resp.content_length() {
-            event!(name: "receive.gauge", target: USER_TASK, Level::INFO, value = size as f64);
-        }
-        event!(name: "status.counter", target: USER_TASK, Level::INFO, status = resp.status().as_str(), value = 1u64);
-        Ok(resp)
+        send_request(request, client).await
     }
+}
+
+/// Send a reqwest Request and emit traces for crate's tracing layer.
+///
+/// You can call this method directly with reqwest types without making use
+/// of any wrapper types.
+pub async fn send_request(
+    request: reqwest::Request,
+    client: reqwest::Client,
+) -> Result<reqwest::Response, reqwest::Error> {
+    let host = request.url().host();
+    let path = request.url().path();
+    let method = request.method();
+    let span = span!(target: USER_TASK, Level::INFO, "reqwest", url = field::Empty, %path, %method);
+    let _t = span.enter();
+    if let Some(host) = host {
+        span.record("url", field::display(host));
+    }
+    use http_body::Body as _;
+    if let Some(size) = request.body().and_then(|x| x.size_hint().exact()) {
+        event!(name: "sent.gauge", target: USER_TASK, Level::INFO, value = size as f64);
+    }
+    drop(_t);
+    let resp = client.execute(request).await?;
+    let _t = span.enter();
+    if let Some(size) = resp.content_length() {
+        event!(name: "receive.gauge", target: USER_TASK, Level::INFO, value = size as f64);
+    }
+    event!(name: "status.counter", target: USER_TASK, Level::INFO, status = resp.status().as_str(), value = 1u64);
+    Ok(resp)
 }
