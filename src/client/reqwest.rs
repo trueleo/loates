@@ -62,7 +62,7 @@ impl Client {
         &self,
         request: reqwest::Request,
     ) -> impl futures::Future<Output = Result<reqwest::Response, reqwest::Error>> {
-        self.inner.execute(request)
+        send_request(request, &self.inner)
     }
 
     pub fn head<U: reqwest::IntoUrl>(&self, url: U) -> RequestBuilder {
@@ -116,7 +116,7 @@ impl RequestBuilder {
     pub async fn send(self) -> Result<reqwest::Response, reqwest::Error> {
         let (client, request) = self.inner.build_split();
         let request = request?;
-        send_request(request, client).await
+        send_request(request, &client).await
     }
 }
 
@@ -124,10 +124,10 @@ impl RequestBuilder {
 ///
 /// You can call this method directly with reqwest types without making use
 /// of any wrapper types.
-pub async fn send_request(
+pub fn send_request(
     request: reqwest::Request,
-    client: reqwest::Client,
-) -> Result<reqwest::Response, reqwest::Error> {
+    client: &reqwest::Client,
+) -> impl futures::Future<Output = Result<reqwest::Response, reqwest::Error>> {
     let host = request.url().host();
     let path = request.url().path();
     let method = request.method();
@@ -141,11 +141,15 @@ pub async fn send_request(
         event!(name: "sent.gauge", target: USER_TASK, Level::INFO, value = size as f64);
     }
     drop(_t);
-    let resp = client.execute(request).await?;
-    let _t = span.enter();
-    if let Some(size) = resp.content_length() {
-        event!(name: "receive.gauge", target: USER_TASK, Level::INFO, value = size as f64);
+    let fut = client.execute(request);
+
+    async move {
+        let resp = fut.await?;
+        let _t = span.enter();
+        if let Some(size) = resp.content_length() {
+            event!(name: "receive.gauge", target: USER_TASK, Level::INFO, value = size as f64);
+        }
+        event!(name: "status.counter", target: USER_TASK, Level::INFO, status = resp.status().as_str(), value = 1u64);
+        Ok(resp)
     }
-    event!(name: "status.counter", target: USER_TASK, Level::INFO, status = resp.status().as_str(), value = 1u64);
-    Ok(resp)
 }
