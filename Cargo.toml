@@ -95,4 +95,4 @@ path = "./examples/web.rs"
 required-features = ["web", "reqwest"]
 
 [package.metadata.ui]
-assets-url = "https://github.com/trueleo/loates-web/releases/download/v1.0.0-29672df/build.zip"
+assets-url = "https://github.com/trueleo/loates-web/releases/download/v1.0.1-18c8e24/build.zip"
