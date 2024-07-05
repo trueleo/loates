@@ -6,6 +6,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+#[cfg(feature = "web")]
 pub fn compile_web_ui() -> io::Result<()> {
     use std::env;
     use std::fs::create_dir_all;
