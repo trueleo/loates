@@ -47,7 +47,7 @@ pub fn compile_web_ui() -> std::io::Result<()> {
         .expect("Failed to get resource from {url}");
 
     create_dir_all(&ui_path)?;
-    let mut zip = zip::read::ZipArchive::new(io::Cursor::new(&build_zip))?;
+    let mut zip = zip::read::ZipArchive::new(std::io::Cursor::new(&build_zip))?;
     zip.extract(&ui_path)?;
     resource_dir(ui_path.join("dist")).build()?;
 
