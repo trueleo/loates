@@ -1,6 +1,5 @@
 use std::{collections::VecDeque, fmt::Debug, sync::Mutex, time::Duration};
 
-use itertools::Itertools;
 use ordered_float::OrderedFloat;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Flex, Layout, Margin, Rect},
@@ -505,11 +504,12 @@ pub(super) fn ui(f: &mut Frame, app: &Mutex<App>, state: &TuiState) {
         info_render(f, margin(info_area, 2, 0));
 
         let metric_area = margin(metric_area, 1, 1);
-        let metrics = app.current_scenario().execs[state.current_exec_selected]
+        let mut metrics: Vec<_> = app.current_scenario().execs[state.current_exec_selected]
             .metrics
             .iter()
-            .sorted_by_key(|(x, _)| x.name)
-            .collect_vec();
+            .collect();
+        metrics.sort_by_key(|(x, _)| x.name);
+
         render_metrics(&metrics, metric_area, f)
     }
 }

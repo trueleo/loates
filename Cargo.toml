@@ -34,24 +34,24 @@ open = ["dep:open"]
 atomic = "0.6"
 anyhow = "1.0"
 async-trait = "0.1"
+async_fn_traits = "0.1"
 async-stream = "0.3"
 dashmap = "6.0"
 futures = { version = "0.3", features = ["std"] }
 thiserror = "1.0"
 async-scoped = { version = "0.9", features = ["use-tokio"] }
-tokio = { version = "1.35", features = ["rt", "macros", "time"] }
+tokio = { version = "1.35", features = [
+    "time",
+    "sync",
+    "net",
+], default-features = false }
 ordered-float = "4.2"
-tokio-stream = "0.1"
 tracing-subscriber = { version = "0.3", features = [
-    "fmt",
-    "env-filter",
     "registry",
-] }
+], default-features = false }
 tracing = "0.1"
 tdigest = "0.2"
-async_fn_traits = "0.1"
 http-body = "1.0"
-itertools = "0.13"
 bytemuck = "1.16"
 chrono = "0.4"
 
@@ -79,6 +79,10 @@ version = "0.12"
 default-features = false
 features = ["http2", "rustls-tls", "charset"]
 
+[dev-dependencies.tokio]
+version = "1.35"
+default-features = false
+features = ["rt", "macros"]
 
 [[example]]
 name = "simple"
