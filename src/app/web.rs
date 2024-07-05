@@ -1,13 +1,16 @@
 use axum::{
-    extract::State,
+    body::{Body, Bytes},
+    extract::{Path, State},
     http::StatusCode,
-    response::{sse::Event, Html, IntoResponse},
+    response::{sse::Event, Html, IntoResponse, Response},
     routing::{get, Router},
     Json,
 };
 use futures::Future;
 use serde::Deserialize;
+use static_files::Resource;
 use std::{
+    collections::HashMap,
     error::Error,
     sync::{Arc, Mutex},
     time::Duration,
@@ -17,15 +20,21 @@ use crate::tracing::message::Message;
 
 use super::App;
 
+include!(concat!(env!("OUT_DIR"), "/generated.rs"));
+
 pub fn run(
     app: Arc<Mutex<App>>,
     mut rx: crate::Receiver<Message>,
 ) -> impl Future<Output = Result<(), Box<dyn Error + Send + Sync + 'static>>> + Send + 'static {
+    let static_files = Arc::new(generate());
+
     let router = Router::new()
         .route("/updates", get(stream_messages))
         .with_state(app.clone())
         .route("/commands", axum::routing::post(commands))
-        .fallback(get(index))
+        .route("/*path", get(serve_static))
+        .fallback(index)
+        .with_state(static_files)
         .layer(tower_http::cors::CorsLayer::very_permissive());
 
     async move {
@@ -44,60 +53,24 @@ pub fn run(
     }
 }
 
-async fn index() -> Html<&'static str> {
-    Html(
-        r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SSE Updates</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-        }
-        #updates {
-            margin-top: 20px;
-        }
-        .update {
-            padding: 10px;
-            border-bottom: 1px solid #ccc;
-        }
-    </style>
-</head>
-<body>
-    <h1>Real-Time Updates</h1>
-    <div id="updates">
-        <!-- Updates will be appended here -->
-    </div>
+async fn index(static_files: State<Arc<HashMap<&'static str, Resource>>>) -> Html<&'static [u8]> {
+    static_files.get("index.html").unwrap().data.into()
+}
 
-    <script>
-        // Function to create a new update element
-        function createUpdateElement(data) {
-            const updateElement = document.createElement('div');
-            updateElement.className = 'update';
-            updateElement.textContent = data;
-            return updateElement;
-        }
-
-        // Initialize the EventSource
-        const eventSource = new EventSource('/updates');
-
-        // Event listener for incoming messages
-        eventSource.onmessage = function(event) {
-            const updatesContainer = document.getElementById('updates');
-            const updateElement = createUpdateElement(event.data);
-            updatesContainer.appendChild(updateElement);
-        };
-
-        // Event listener for errors
-        eventSource.onerror = function(event) {
-            console.error('EventSource failed:', event);
-        };
-    </script>
-</body>
-</html>"#,
-    )
+async fn serve_static(
+    Path(path): Path<String>,
+    static_files: State<Arc<HashMap<&'static str, Resource>>>,
+) -> Result<impl IntoResponse, StatusCode> {
+    if let Some(resource) = static_files.get(&*path) {
+        let resp = Response::builder()
+            .status(200)
+            .header(axum::http::header::CONTENT_TYPE, resource.mime_type)
+            .body(Body::from(Bytes::from_static(resource.data)))
+            .unwrap();
+        Ok(resp)
+    } else {
+        Err(StatusCode::NOT_FOUND)
+    }
 }
 
 async fn stream_messages(State(app): State<Arc<Mutex<App>>>) -> impl IntoResponse {

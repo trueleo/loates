@@ -2,12 +2,21 @@
 name = "rusher"
 version = "0.1.0"
 edition = "2021"
+resolver = "2"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
 tui = ["dep:ratatui", "dep:crossterm"]
-web = ["dep:axum", "dep:tower-http", "serde"]
+web = [
+    "serde",
+    "dep:axum",
+    "dep:tower-http",
+    "dep:static-files",
+    "dep:cargo_toml",
+    "dep:ureq",
+    "dep:zip",
+]
 reqwest = ["dep:reqwest"]
 
 [dependencies]
@@ -40,12 +49,25 @@ crossterm = { version = "0.26", optional = true }
 axum = { version = "0.7.5", features = ["json"], optional = true }
 serde = { version = "1.0.203", features = ["derive"], optional = true }
 tower-http = { version = "0.5.2", features = ["cors"], optional = true }
+static-files = { version = "0.2.3", optional = true }
 
 [dependencies.reqwest]
 version = "0.12"
 default-features = false
 features = ["http2", "rustls-tls", "charset", "stream", "multipart"]
 optional = true
+
+[build-dependencies]
+cargo_toml = { version = "0.20.3", optional = true }
+ureq = { version = "2.9.7", optional = true }
+static-files = { version = "0.2.3", optional = true }
+zip = { version = "2.1.3", optional = true }
+
+[dev-dependencies.reqwest]
+version = "0.12"
+default-features = false
+features = ["http2", "rustls-tls", "charset"]
+
 
 [[example]]
 name = "simple"
@@ -57,7 +79,5 @@ name = "web"
 path = "./examples/web.rs"
 required-features = ["web", "reqwest"]
 
-[dev-dependencies.reqwest]
-version = "0.12"
-default-features = false
-features = ["http2", "rustls-tls", "charset"]
+[package.metadata.ui]
+assets-url = "https://github.com/trueleo/rusher-web/releases/download/v0.0.0-e3f204e/build.zip"
