@@ -6,7 +6,6 @@ rust-version = "1.75"
 description = "Rusher is a load testing framework, with focus on ease of use and flexiblity."
 repository = "https://github.com/trueleo/rusher"
 license = "MIT"
-license-file = "LICENSE"
 keywords = ["testing", "load-testing", "http"]
 categories = [
     "concurrency",
