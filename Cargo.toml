@@ -1,10 +1,20 @@
 [package]
 name = "rusher"
-version = "0.1.0"
+version = "0.1.0-alpha"
 edition = "2021"
-resolver = "2"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+rust-version = "1.75"
+description = "Rusher is a load testing framework, with focus on ease of use and flexiblity."
+repository = "https://github.com/trueleo/rusher"
+license = "MIT"
+license-file = "LICENSE"
+keywords = ["testing", "load-testing", "http"]
+categories = [
+    "concurrency",
+    "development-tools",
+    "development-tools::profiling",
+    "web-programming",
+]
+exclude = ["/assets"]
 
 [features]
 tui = ["dep:ratatui", "dep:crossterm"]
