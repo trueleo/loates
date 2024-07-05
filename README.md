@@ -5,7 +5,7 @@ Loates is inspired by tools like grafana k6, you can easily simulate a high numb
 
 Instead of being a tool like k6 which runs javascript for you, loates is a simple rust library that any user can use to define their testcases. Loates is not desgined with any paticular usecase in mind. It's upto the user to decide what they wanna loadtest and how.
 
-![screenshot of loates in action](assets/screengrab.gif)
+![screenshot of loates in action](assets/screenshot.png)
 
 ## Features
 
