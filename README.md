@@ -15,8 +15,6 @@ Instead of being a tool like k6 which runs javascript for you, loates is a simpl
 
 ## Roadmap
 
-- CLI/TUI components
-- Inbuilt webserver to show results on a browser realtime
 - Making it easier to run in a distributed setup
 - covering more usecases.
 - Simulating more complex patterns
