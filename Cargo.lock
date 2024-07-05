@@ -978,6 +978,39 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97b3888a4aecf77e811145cadf6eef5901f4782c53886191b2f693f24761847c"
 
 [[package]]
+name = "loates"
+version = "0.1.0-alpha"
+dependencies = [
+ "anyhow",
+ "async-scoped",
+ "async-stream",
+ "async-trait",
+ "async_fn_traits",
+ "atomic",
+ "axum",
+ "bytemuck",
+ "cargo_toml",
+ "chrono",
+ "dashmap",
+ "futures",
+ "http-body",
+ "open",
+ "ordered-float 4.2.1",
+ "ratatui",
+ "reqwest",
+ "serde",
+ "static-files",
+ "tdigest",
+ "thiserror",
+ "tokio",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "ureq",
+ "zip",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1437,39 +1470,6 @@ dependencies = [
  "spin",
  "untrusted",
  "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "rusher"
-version = "0.1.0-alpha"
-dependencies = [
- "anyhow",
- "async-scoped",
- "async-stream",
- "async-trait",
- "async_fn_traits",
- "atomic",
- "axum",
- "bytemuck",
- "cargo_toml",
- "chrono",
- "dashmap",
- "futures",
- "http-body",
- "open",
- "ordered-float 4.2.1",
- "ratatui",
- "reqwest",
- "serde",
- "static-files",
- "tdigest",
- "thiserror",
- "tokio",
- "tower-http",
- "tracing",
- "tracing-subscriber",
- "ureq",
- "zip",
 ]
 
 [[package]]

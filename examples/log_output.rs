@@ -1,10 +1,10 @@
 use std::time::Duration;
 
-use rusher::error::Error;
-use rusher::prelude::*;
+use loates::error::Error;
+use loates::prelude::*;
 
-use rusher::tracing::Message;
-use rusher::tracing::TracerLayer;
+use loates::tracing::Message;
+use loates::tracing::TracerLayer;
 // use tracing_subscriber::fmt::format::{format, FmtSpan};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Registry;
@@ -14,7 +14,7 @@ struct MyUser {}
 impl User for MyUser {
     async fn call(&mut self) -> UserResult {
         // In each iteration get the next string
-        let res = rusher::client::reqwest::Client::new()
+        let res = loates::client::reqwest::Client::new()
             .post("https://httpbin.org/anything")
             .body("abc")
             .send()

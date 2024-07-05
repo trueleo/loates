@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-use rusher::client::reqwest::Client;
-use rusher::error::Error;
-use rusher::prelude::*;
+use loates::client::reqwest::Client;
+use loates::error::Error;
+use loates::prelude::*;
 
 struct MyUser<Iter> {
     client: Client,

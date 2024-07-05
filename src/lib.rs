@@ -1,4 +1,4 @@
-/*! Rusher is an simple and easy load testing framework for Rust,
+/*! Loates is an simple and easy load testing framework for Rust,
 inspired by [grafana k6](https://k6.io) and powered by
 [`tracing`](https://docs.rs/tracing/latest/tracing/) crate.
 
@@ -22,19 +22,19 @@ Users of this framework are suppose to implement [`User`](user::User) trait for 
 
 * *Datastores* - Each execution creates a [RuntimeDataStore](data::RuntimeDataStore) before it begins execution, which is used to hold shared data that will be used by User.
 
-* *Executors* - Executors control how rusher will allocate Users and perform iterations. Look at Executor docs for more details.
+* *Executors* - Executors control how loates will allocate Users and perform iterations. Look at Executor docs for more details.
 
 * *Scenario* - Scenario is grouping of one or more executors. Scenarios are ran sequentially in order that they are defined.
 
 
 # Example
-More examples are available in the [github repo](https://github.com/trueleo/rusher/examples)
+More examples are available in the [github repo](https://github.com/trueleo/loates/examples)
 
 ```no_run
 use std::time::Duration;
 
-use rusher::client::reqwest::Client;
-use rusher::prelude::*;
+use loates::client::reqwest::Client;
+use loates::prelude::*;
 
 struct MyUser<Iter> {
     client: Client,
@@ -124,7 +124,7 @@ async fn main() {
 ```
 # Tracing
 
-Rusher relies heavily on usage of tracing and tracing-subscriber to emit and
+Loates relies heavily on usage of tracing and tracing-subscriber to emit and
 collect flow of execution. Even the metrics that show up when a test
 runs is generated through crafted spans and events.
 

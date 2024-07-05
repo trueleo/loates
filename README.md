@@ -1,15 +1,15 @@
-# Rusher
+# Loates
 
-Rusher is a blazingly fast 🚀 load testing library for Rust, with focus on ease of use and flexiblity.
-Rusher is inspired by tools like grafana k6, you can easily simulate a high number of users to test the performance and reliability of your web applications and APIs.
+Loates is a blazingly fast 🚀 load testing library for Rust, with focus on ease of use and flexiblity.
+Loates is inspired by tools like grafana k6, you can easily simulate a high number of users to test the performance and reliability of your web applications and APIs.
 
-Instead of being a tool like k6 which runs javascript for you, rusher is a simple rust library that any user can use to define their testcases. Rusher is not desgined with any paticular usecase in mind. It's upto the user to decide what they wanna loadtest and how.
+Instead of being a tool like k6 which runs javascript for you, loates is a simple rust library that any user can use to define their testcases. Loates is not desgined with any paticular usecase in mind. It's upto the user to decide what they wanna loadtest and how.
 
-![screenshot of rusher in action](assets/screengrab.gif)
+![screenshot of loates in action](assets/screengrab.gif)
 
 ## Features
 
-- **High Performance**: Leveraging Rust's performance and safety, Rusher can handle a high number of virtual users and concurrent requests with minimal overhead.
+- **High Performance**: Leveraging Rust's performance and safety, Loates can handle a high number of virtual users and concurrent requests with minimal overhead.
 - **Extensible**: Customizable test scenarios with a simple to use api.
 - **Real-time Metrics**: Get real-time feedback and detailed metrics on your application's performance.
 
@@ -33,9 +33,9 @@ Instead of being a tool like k6 which runs javascript for you, rusher is a simpl
 ```rust
 use std::time::Duration;
 
-use rusher::client::reqwest::Client;
-use rusher::error::Error;
-use rusher::prelude::*;
+use loates::client::reqwest::Client;
+use loates::error::Error;
+use loates::prelude::*;
 
 struct MyUser<Iter> {
     client: Client,

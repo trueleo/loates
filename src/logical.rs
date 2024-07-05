@@ -139,7 +139,7 @@ pub(crate) trait ExecutionProvider {
 /// Named collection of executions which should run in parallel to each other.    
 ///
 /// A scenario is conceptually a test model which simulates a traffic pattern / load.
-/// For more detailed guide on how to organize a scenario and use multiple Execution in a test. Look at [examples](https://github.com/trueleo/rusher/examples).  
+/// For more detailed guide on how to organize a scenario and use multiple Execution in a test. Look at [examples](https://github.com/trueleo/loates/examples).  
 pub struct Scenario<'env> {
     pub(crate) label: Cow<'static, str>,
     pub(crate) execution_provider: Vec<Box<dyn ExecutionProvider + 'env>>,
