@@ -48,6 +48,7 @@ pub fn run(
             }
         });
         let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
+        let _ = open::that("http://localhost:3000");
         axum::serve(listener, router.into_make_service()).await?;
         Ok(())
     }
