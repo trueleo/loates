@@ -391,7 +391,7 @@ fn render_metrics(metrics: &[(&MetricSetKey, &VecDeque<MetricValue>)], rect: Rec
     .split(rect);
 
     for (metric, &rect) in metrics.iter().zip(layout.iter()) {
-        let rect = rect.inner(&Margin {
+        let rect = rect.inner(Margin {
             horizontal: 2,
             vertical: 0,
         });
@@ -404,7 +404,7 @@ fn render_metrics(metrics: &[(&MetricSetKey, &VecDeque<MetricValue>)], rect: Rec
 }
 
 fn margin(rect: Rect, h: u16, v: u16) -> Rect {
-    rect.inner(&Margin {
+    rect.inner(Margin {
         horizontal: h,
         vertical: v,
     })

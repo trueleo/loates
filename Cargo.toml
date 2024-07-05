@@ -17,7 +17,7 @@ categories = [
 exclude = ["/assets"]
 
 [features]
-tui = ["dep:ratatui", "dep:crossterm"]
+tui = ["dep:ratatui"]
 web = [
     "serde",
     "dep:axum",
@@ -32,11 +32,11 @@ reqwest = ["dep:reqwest"]
 open = ["dep:open"]
 
 [dependencies]
-atomic = "0.6.0"
+atomic = "0.6"
 anyhow = "1.0"
 async-trait = "0.1"
 async-stream = "0.3"
-dashmap = "5.5.3"
+dashmap = "6.0"
 futures = { version = "0.3", features = ["std"] }
 thiserror = "1.0"
 async-scoped = { version = "0.9", features = ["use-tokio"] }
@@ -56,8 +56,7 @@ itertools = "0.13"
 bytemuck = "1.16.0"
 chrono = "0.4.38"
 
-ratatui = { version = "0.26", optional = true }
-crossterm = { version = "0.26", optional = true }
+ratatui = { version = "0.27", optional = true }
 axum = { version = "0.7.5", features = ["json"], optional = true }
 serde = { version = "1.0.203", features = ["derive"], optional = true }
 tower-http = { version = "0.5.2", features = ["cors"], optional = true }

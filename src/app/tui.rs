@@ -8,9 +8,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crossterm::event::KeyCode;
 use ratatui::{
     backend::{Backend, CrosstermBackend},
+    crossterm::{self, event::KeyCode},
     style::Stylize,
     terminal::{Terminal, Viewport},
     text::{Span, Text},
