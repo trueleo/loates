@@ -41,27 +41,27 @@ futures = { version = "0.3", features = ["std"] }
 thiserror = "1.0"
 async-scoped = { version = "0.9", features = ["use-tokio"] }
 tokio = { version = "1.35", features = ["rt", "macros", "time"] }
-ordered-float = "4.2.0"
+ordered-float = "4.2"
 tokio-stream = "0.1"
 tracing-subscriber = { version = "0.3", features = [
     "fmt",
     "env-filter",
     "registry",
 ] }
-tracing = "0.1.40"
-tdigest = "0.2.3"
-async_fn_traits = "0.1.1"
-http-body = "1.0.0"
+tracing = "0.1"
+tdigest = "0.2"
+async_fn_traits = "0.1"
+http-body = "1.0"
 itertools = "0.13"
-bytemuck = "1.16.0"
-chrono = "0.4.38"
+bytemuck = "1.16"
+chrono = "0.4"
 
 ratatui = { version = "0.27", optional = true }
-axum = { version = "0.7.5", features = ["json"], optional = true }
-serde = { version = "1.0.203", features = ["derive"], optional = true }
-tower-http = { version = "0.5.2", features = ["cors"], optional = true }
-static-files = { version = "0.2.3", optional = true }
-open = { version = "5.2.0", optional = true }
+axum = { version = "0.7", features = ["json"], optional = true }
+serde = { version = "1.0", features = ["derive"], optional = true }
+tower-http = { version = "0.5", features = ["cors"], optional = true }
+static-files = { version = "0.2", optional = true }
+open = { version = "5.2", optional = true }
 
 [dependencies.reqwest]
 version = "0.12"
@@ -70,10 +70,10 @@ features = ["http2", "rustls-tls", "charset", "stream", "multipart"]
 optional = true
 
 [build-dependencies]
-cargo_toml = { version = "0.20.3", optional = true }
-ureq = { version = "2.9.7", optional = true }
-static-files = { version = "0.2.3", optional = true }
-zip = { version = "2.1.3", optional = true }
+cargo_toml = { version = "0.20", optional = true }
+ureq = { version = "2.9", optional = true }
+static-files = { version = "0.2", optional = true }
+zip = { version = "2", optional = true }
 
 [dev-dependencies.reqwest]
 version = "0.12"
