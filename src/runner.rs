@@ -40,9 +40,9 @@ impl<'env> Runner<'env> {
         let web_handle = self.spawn_web();
 
         let mut runtime_ctx = self.create_contexts();
-        let mut scenarios = self.runtime_scenarios(&mut runtime_ctx).await;
+        let scenarios = self.runtime_scenarios(&mut runtime_ctx).await;
 
-        for (scenario_index, (scenario_name, scenario)) in scenarios.iter_mut().enumerate() {
+        for (scenario_index, (scenario_name, mut scenario)) in scenarios.into_iter().enumerate() {
             let span = tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_SCENARIO, name = scenario_name.as_ref(), id = scenario_index as u64);
             let _entered = span.enter();
 
@@ -59,11 +59,22 @@ impl<'env> Runner<'env> {
             }
 
             drop(user_result_tx);
-            if has_user_terminated(user_result_rx).await {
+
+            let has_user_terminated = has_user_terminated(user_result_rx).await;
+            if has_user_terminated {
                 scope.cancel();
-                break;
             } else {
                 Scope::collect(&mut scope).await;
+            }
+            drop(scope);
+
+            futures::StreamExt::collect::<()>(futures::stream::FuturesUnordered::from_iter(
+                scenario.into_iter().map(|(_, exec)| exec.drop()),
+            ))
+            .await;
+
+            if has_user_terminated {
+                break;
             }
         }
 
