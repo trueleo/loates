@@ -129,6 +129,7 @@ impl std::fmt::Display for Executor {
 
 #[async_trait::async_trait]
 pub(crate) trait ExecutionProvider {
+    fn start_after(&self) -> Duration;
     fn config(&self) -> &Executor;
     async fn execution<'a>(
         &'a self,
@@ -171,6 +172,7 @@ impl<'env> Scenario<'env> {
 ///
 /// A [`Scenario`] can contain one or more of these *execution plans*.
 pub struct Execution<'env, Ub> {
+    start_after: Duration,
     user_builder: Ub,
     datastore_modifiers: Vec<Box<dyn DatastoreModifier + 'env>>,
     executor: Executor,
@@ -180,6 +182,7 @@ impl<'env, Ub> Execution<'env, Ub> {
     /// Create a new Execution with a [`user builder`](AsyncUserBuilder) and an [`Executor`]
     pub fn new(user_builder: Ub, executor: Executor) -> Self {
         Self {
+            start_after: Duration::ZERO,
             user_builder,
             datastore_modifiers: vec![],
             executor,
@@ -191,6 +194,7 @@ impl Execution<'static, ()> {
     /// Create a new Execution plan using builder pattern
     pub fn builder() -> Execution<'static, ()> {
         Self {
+            start_after: Duration::ZERO,
             user_builder: (),
             datastore_modifiers: Vec::new(),
             executor: Executor::Once,
@@ -206,6 +210,7 @@ impl Execution<'static, ()> {
             user_builder,
             executor: self.executor,
             datastore_modifiers: self.datastore_modifiers,
+            start_after: self.start_after,
         }
     }
 }
@@ -227,6 +232,12 @@ where
         self
     }
 
+    /// Start this execution some duration after start of the scenario
+    pub fn start_after(mut self, duration: Duration) -> Self {
+        self.start_after = duration;
+        self
+    }
+
     /// Convert this Execution to a Scenario with provided label.
     pub fn to_scenario(self, label: impl Into<Cow<'static, str>>) -> Scenario<'env> {
         Scenario::new(label, self)
@@ -238,6 +249,10 @@ impl<'env, Ub> ExecutionProvider for Execution<'env, Ub>
 where
     Ub: for<'a> AsyncUserBuilder<'a>,
 {
+    fn start_after(&self) -> Duration {
+        self.start_after
+    }
+
     fn config(&self) -> &Executor {
         &self.executor
     }

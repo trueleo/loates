@@ -1,13 +1,12 @@
-use std::borrow::Cow;
-
 use crate::data::DatastoreModifier;
 use crate::data::RuntimeDataStore;
-use crate::executor::Executor;
 use crate::{CRATE_NAME, SPAN_EXEC, SPAN_SCENARIO};
 
 use crate::logical;
 
 use async_scoped::{self, Scope};
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 use tracing::{event, Instrument};
 
 /// The Runner struct is the top level struct for managing and executing series of logical scenarios asynchronously.
@@ -39,25 +38,56 @@ impl<'env> Runner<'env> {
         #[cfg(feature = "web")]
         let web_handle = self.spawn_web();
 
-        let mut runtime_ctx = self.create_contexts();
-        let scenarios = self.runtime_scenarios(&mut runtime_ctx).await;
-
-        for (scenario_index, (scenario_name, mut scenario)) in scenarios.into_iter().enumerate() {
-            let span = tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_SCENARIO, name = scenario_name.as_ref(), id = scenario_index as u64);
+        for (scenario_index, scenario) in self.scenarios().iter().enumerate() {
+            let span = tracing::span!(target: CRATE_NAME, tracing::Level::INFO, SPAN_SCENARIO, name = scenario.label.as_ref(), id = scenario_index as u64);
             let _entered = span.enter();
+
+            // create runtime datastores
+            let mut runtime_context: Vec<_> = scenario
+                .execution_provider
+                .iter()
+                .map(|_| ExecutionRuntimeCtx::new())
+                .collect();
+
+            // Init all the executors
+            let mut executors = Vec::with_capacity(scenario.execution_provider.len());
+            for (exec, ctx) in scenario
+                .execution_provider
+                .iter()
+                .zip(runtime_context.iter_mut())
+            {
+                executors.push(exec.execution(ctx).await);
+            }
 
             let mut scope =
                 unsafe { async_scoped::Scope::create(async_scoped::spawner::use_tokio::Tokio) };
 
-            // gather user_results from every executor.
+            // channel to gather user_results from every executor.
             let (user_result_tx, user_result_rx) = crate::channel();
 
-            for (executor_index, (executor_name, executor)) in scenario.iter_mut().enumerate() {
-                let span = tracing::span!(target: CRATE_NAME, parent: &span, tracing::Level::INFO, SPAN_EXEC, name = %executor_name, id = executor_index as u64);
-                let task = executor.execute(user_result_tx.clone());
+            // trigger for spawning executors into scope.
+            let mut spawn_executor: FuturesUnordered<_> = scenario
+                .execution_provider
+                .iter()
+                .zip(executors.iter_mut())
+                .enumerate()
+                .map(|(idx, (logical, runtime))| async move {
+                    tokio::time::sleep(logical.start_after()).await;
+                    (idx, logical, runtime)
+                })
+                .collect();
+
+            // spawn executors according to their delay
+            while let Some((idx, logical, runtime)) = spawn_executor.next().await {
+                let executor_name = logical.config().to_string();
+                let span = tracing::span!(target: CRATE_NAME, parent: &span, tracing::Level::INFO, SPAN_EXEC, name = %executor_name, id = idx as u64);
+                let task = runtime.execute(user_result_tx.clone());
                 scope.spawn_cancellable(task.instrument(span.clone()), || ());
             }
 
+            drop(spawn_executor);
+
+            // drop last sender
             drop(user_result_tx);
 
             let has_user_terminated = has_user_terminated(user_result_rx).await;
@@ -66,10 +96,11 @@ impl<'env> Runner<'env> {
             } else {
                 Scope::collect(&mut scope).await;
             }
+
             drop(scope);
 
             futures::StreamExt::collect::<()>(futures::stream::FuturesUnordered::from_iter(
-                scenario.into_iter().map(|(_, exec)| exec.drop()),
+                executors.into_iter().map(|exec| exec.drop()),
             ))
             .await;
 
@@ -93,40 +124,7 @@ impl<'env> Runner<'env> {
         Ok(())
     }
 
-    async fn runtime_scenarios<'a>(
-        &'a self,
-        runtime_ctx: &'a mut [Vec<ExecutionRuntimeCtx>],
-    ) -> Vec<(
-        Cow<str>,
-        Vec<(&'a logical::Executor, Box<dyn Executor + '_>)>,
-    )> {
-        let mut scenarios = Vec::new();
-        let runtime_ctx_mut = runtime_ctx.iter_mut().map(|x| x.iter_mut());
-        for (logical_scenario, context) in self.logical.scenarios.iter().zip(runtime_ctx_mut) {
-            let mut scenario = Vec::new();
-            for (exec, context) in logical_scenario.execution_provider.iter().zip(context) {
-                scenario.push((exec.config(), exec.execution(context).await))
-            }
-            scenarios.push((logical_scenario.label.clone(), scenario))
-        }
-        scenarios
-    }
-
-    fn create_contexts(&self) -> Vec<Vec<ExecutionRuntimeCtx>> {
-        self.logical
-            .scenarios
-            .iter()
-            .map(|scenario| {
-                scenario
-                    .execution_provider
-                    .iter()
-                    .map(|_| ExecutionRuntimeCtx::new())
-                    .collect()
-            })
-            .collect()
-    }
-
-    pub fn scenario(&self) -> &[logical::Scenario<'env>] {
+    pub fn scenarios(&self) -> &[logical::Scenario<'env>] {
         &self.logical.scenarios
     }
 
