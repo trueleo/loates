@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures::Future;
+use futures::{stream::FuturesUnordered, Future};
 use tokio::sync::Mutex;
 use tracing::{event, Instrument, Level};
 
@@ -18,8 +18,14 @@ use crate::{
 
 type ExecutorTask<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 
-pub trait Executor: Send {
+pub trait Executor<'ctx>: Send
+where
+    Self: 'ctx,
+{
     fn execute(&mut self, tx: crate::Sender<UserResult>) -> ExecutorTask<'_>;
+    fn drop(self: Box<Self>) -> ExecutorTask<'ctx> {
+        Box::pin(std::future::ready(()))
+    }
 }
 
 pub(crate) enum DataExecutor<'ctx, Ub: for<'a> AsyncUserBuilder<'a>> {
@@ -98,8 +104,7 @@ impl<'ctx, Ub: for<'a> AsyncUserBuilder<'a>> DataExecutor<'ctx, Ub> {
     }
 }
 
-#[async_trait::async_trait]
-impl<'ctx, Ub> Executor for DataExecutor<'ctx, Ub>
+impl<'ctx, Ub> Executor<'ctx> for DataExecutor<'ctx, Ub>
 where
     Ub: for<'a> AsyncUserBuilder<'a>,
 {
@@ -114,22 +119,36 @@ where
             DataExecutor::RampingArrivalRate(exec) => exec.execute(tx),
         }
     }
+
+    fn drop(self: Box<Self>) -> ExecutorTask<'ctx> {
+        use futures::StreamExt;
+
+        match *self {
+            DataExecutor::Once(Once { user }) => Box::pin(user.drop()),
+            DataExecutor::Constant(Constant { users, .. })
+            | DataExecutor::Shared(SharedIterations { users, .. })
+            | DataExecutor::PerUser(PerUserIteration { users, .. })
+            | DataExecutor::RampingUser(RampingUser { users, .. }) => {
+                Box::pin(FuturesUnordered::from_iter(users.into_iter().map(|x| x.drop())).collect())
+            }
+            DataExecutor::ConstantArrivalRate(RampingArrivalRate { users, .. })
+            | DataExecutor::RampingArrivalRate(RampingArrivalRate { users, .. }) => Box::pin(
+                FuturesUnordered::from_iter(users.into_iter().map(|x| x.into_inner().drop()))
+                    .collect(),
+            ),
+        }
+    }
 }
 
 pub(crate) struct Once<U> {
     user: U,
 }
 
-impl<U> Once<U> {
+impl<U: User> Once<U> {
     fn new(user: U) -> Self {
         Once { user }
     }
-}
 
-impl<U> Executor for Once<U>
-where
-    U: User,
-{
     fn execute(&mut self, tx: crate::Sender<UserResult>) -> ExecutorTask<'_> {
         let task = self.user.call();
         let exec = async move {
@@ -154,13 +173,11 @@ pub(crate) struct Constant<U> {
     duration: Duration,
 }
 
-impl<U> Constant<U> {
+impl<U: User> Constant<U> {
     fn new(users: Vec<U>, duration: Duration) -> Self {
         Self { users, duration }
     }
-}
 
-impl<U: User> Executor for Constant<U> {
     fn execute(&mut self, tx: crate::Sender<UserResult>) -> ExecutorTask<'_> {
         let users_len = self.users.len();
         let total_duration_as_secs = self.duration.as_secs();
@@ -257,13 +274,11 @@ pub(crate) struct PerUserIteration<U> {
     iterations: usize,
 }
 
-impl<U> PerUserIteration<U> {
+impl<U: User> PerUserIteration<U> {
     fn new(users: Vec<U>, iterations: usize) -> Self {
         Self { users, iterations }
     }
-}
 
-impl<U: User> Executor for PerUserIteration<U> {
     fn execute(&mut self, tx: crate::Sender<UserResult>) -> ExecutorTask<'_> {
         let Self { users, iterations } = self;
         let users_len = users.len();
@@ -298,14 +313,18 @@ impl<U: User> Executor for PerUserIteration<U> {
     }
 }
 
-pub(crate) struct RampingUser<'ctx, Ub> {
+pub(crate) struct RampingUser<'ctx, Ub: AsyncUserBuilder<'ctx> + Sync> {
     datastore: &'ctx RuntimeDataStore,
     user_builder: &'ctx Ub,
     pre_allocate_users: usize,
     stages: Vec<(usize, Duration)>,
+    users: Vec<Ub::Output>,
 }
 
-impl<'ctx, Ub> RampingUser<'ctx, Ub> {
+impl<'ctx, Ub> RampingUser<'ctx, Ub>
+where
+    Ub: AsyncUserBuilder<'ctx> + Sync,
+{
     fn new(
         datastore: &'ctx RuntimeDataStore,
         user_builder: &'ctx Ub,
@@ -317,24 +336,21 @@ impl<'ctx, Ub> RampingUser<'ctx, Ub> {
             user_builder,
             pre_allocate_users: initial_users,
             stages,
+            users: Vec::default(),
         }
     }
-}
 
-impl<'ctx, Ub> Executor for RampingUser<'ctx, Ub>
-where
-    Ub: for<'a> AsyncUserBuilder<'a>,
-{
     fn execute(&mut self, tx: crate::Sender<UserResult>) -> ExecutorTask<'_> {
         let datastore = self.datastore;
         let user_builder = self.user_builder;
         let pre_allocated_users = self.pre_allocate_users;
         let stages = &*self.stages;
         let total_duration: u64 = stages.iter().map(|(_, duration)| duration.as_secs()).sum();
+        let users = &mut self.users;
 
         let task = async move {
             event!(target: CRATE_NAME, Level::INFO, total_duration = total_duration);
-            let mut users = build_users(datastore, user_builder, pre_allocated_users)
+            *users = build_users(datastore, user_builder, pre_allocated_users)
                 .await
                 .unwrap();
             event!(target: CRATE_NAME, Level::INFO, users = users.len(), users_max = pre_allocated_users);
@@ -375,15 +391,19 @@ where
     }
 }
 
-pub(crate) struct RampingArrivalRate<'ctx, Ub> {
+pub(crate) struct RampingArrivalRate<'ctx, Ub: AsyncUserBuilder<'ctx> + Sync> {
     datastore: &'ctx RuntimeDataStore,
     user_builder: &'ctx Ub,
     pre_allocate_users: usize,
     stages: Vec<(Rate, Duration)>,
     max_users: usize,
+    users: Vec<Mutex<Ub::Output>>,
 }
 
-impl<'ctx, Ub> RampingArrivalRate<'ctx, Ub> {
+impl<'ctx, Ub> RampingArrivalRate<'ctx, Ub>
+where
+    Ub: AsyncUserBuilder<'ctx> + Sync,
+{
     fn new(
         datastore: &'ctx RuntimeDataStore,
         user_builder: &'ctx Ub,
@@ -397,14 +417,10 @@ impl<'ctx, Ub> RampingArrivalRate<'ctx, Ub> {
             pre_allocate_users,
             stages,
             max_users,
+            users: Vec::default(),
         }
     }
-}
 
-impl<'ctx, Ub> Executor for RampingArrivalRate<'ctx, Ub>
-where
-    Ub: for<'a> AsyncUserBuilder<'a>,
-{
     fn execute(&mut self, tx: crate::Sender<UserResult>) -> ExecutorTask<'_> {
         let datastore = self.datastore;
         let user_builder = self.user_builder;
@@ -412,10 +428,11 @@ where
         let max_users = self.max_users;
         let stages = &*self.stages;
         let total_duration: u64 = stages.iter().map(|(_, duration)| duration.as_secs()).sum();
+        let users = &mut self.users;
 
         let task = async move {
             event!(target: CRATE_NAME, Level::INFO, total_duration = total_duration);
-            let mut users: Vec<_> = build_users(datastore, user_builder, pre_allocated_users)
+            *users = build_users(datastore, user_builder, pre_allocated_users)
                 .await
                 .unwrap()
                 .into_iter()

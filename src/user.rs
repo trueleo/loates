@@ -17,6 +17,13 @@ use crate::{data::RuntimeDataStore, error::Error, UserResult};
 /// A concrete implementation of the `User` trait can have references to data from a [RuntimeDataStore]  
 pub trait User: Send {
     fn call(&mut self) -> impl std::future::Future<Output = UserResult> + std::marker::Send;
+
+    fn drop(self) -> impl std::future::Future<Output = ()> + Send
+    where
+        Self: Sized,
+    {
+        std::future::ready(())
+    }
 }
 
 impl<F, Fut> User for F
