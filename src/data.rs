@@ -81,7 +81,7 @@ impl RuntimeDataStore {
 /// struct Def {
 ///     field: std::sync::Arc<usize>,
 /// }
-
+///
 /// #[async_trait::async_trait]
 /// impl DatastoreModifier for Def {
 ///     async fn init_store(&self, store: &mut RuntimeDataStore) {
@@ -93,17 +93,22 @@ impl RuntimeDataStore {
 #[async_trait::async_trait]
 pub trait DatastoreModifier: Sync {
     async fn init_store(&self, store: &mut RuntimeDataStore);
+    fn clone(&self) -> Box<dyn DatastoreModifier>;
 }
 
 /// Blanket implementation for `async fn(&mut RuntimeDataStore)`
 #[async_trait::async_trait]
 impl<F> DatastoreModifier for F
 where
-    F: for<'a> AsyncFn1<&'a mut RuntimeDataStore, Output = ()> + Sync,
+    F: for<'a> AsyncFn1<&'a mut RuntimeDataStore, Output = ()> + Sync + Clone + 'static,
     for<'b> <F as AsyncFn1<&'b mut RuntimeDataStore>>::OutputFuture: Send,
 {
     async fn init_store(&self, store: &mut RuntimeDataStore) {
         self(store).await
+    }
+
+    fn clone(&self) -> Box<dyn DatastoreModifier> {
+        Box::new(self.clone())
     }
 }
 

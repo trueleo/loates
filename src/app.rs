@@ -71,7 +71,7 @@ pub struct Scenario {
 }
 
 impl Scenario {
-    pub fn new_from_scenario(scenario: &crate::logical::Scenario<'_>) -> Self {
+    pub fn new_from_scenario(scenario: &crate::logical::Scenario) -> Self {
         let name = scenario.label.to_string();
         let execs = scenario
             .execution_provider
@@ -115,11 +115,11 @@ pub struct App {
 impl App {
     pub fn new<'a, T>(scenarios: T) -> Self
     where
-        T: IntoIterator<Item = &'a crate::logical::Scenario<'a>>,
+        T: IntoIterator<Item = &'a crate::logical::Scenario>,
     {
         let scenarios = scenarios
             .into_iter()
-            .map(|scenario| Scenario::new_from_scenario(scenario))
+            .map(Scenario::new_from_scenario)
             .collect();
 
         Self {

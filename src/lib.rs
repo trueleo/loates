@@ -150,7 +150,7 @@ Any span(s) inside of a user task is converted to a histogram metric which would
 */
 
 /// User Interfaces and state management for creating live view of execution.
-#[cfg(any(feature = "tui", feature = "web"))]
+#[cfg(any(feature = "tui", feature = "web", feature = "meta"))]
 pub mod app;
 
 /// Augmented wrapper types for popular crates.
@@ -176,6 +176,7 @@ pub mod tracing;
 pub mod user;
 
 mod executor;
+mod meta;
 
 pub type UserResult = Result<(), crate::error::Error>;
 

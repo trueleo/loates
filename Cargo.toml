@@ -27,8 +27,10 @@ web = [
     "dep:ureq",
     "dep:zip",
 ]
+meta = []
 reqwest = ["dep:reqwest"]
 open = ["dep:open"]
+serde = ["dep:serde"]
 
 [dependencies]
 atomic = "0.6"
@@ -92,6 +94,11 @@ required-features = ["tui", "reqwest"]
 [[example]]
 name = "web"
 path = "./examples/web.rs"
+required-features = ["web", "reqwest"]
+
+[[example]]
+name = "log_out"
+path = "./examples/log_output.rs"
 required-features = ["web", "reqwest"]
 
 [package.metadata.ui]

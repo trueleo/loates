@@ -1,4 +1,8 @@
-use std::{borrow::Cow, fmt::Write, time::Duration};
+use std::{
+    borrow::Cow,
+    fmt::{Debug, Write},
+    time::Duration,
+};
 
 use crate::{
     data::DatastoreModifier, executor::DataExecutor, runner::ExecutionRuntimeCtx,
@@ -106,16 +110,16 @@ impl std::fmt::Display for Executor {
         match self {
             Executor::Once => f.write_str("Once"),
             Executor::Constant { users, duration } => {
-                write!(f, "Constant ({} users) {:?}", users, duration)
+                write!(f, "Constant ({users} users) {duration:?}")
             }
             Executor::Shared {
                 users, iterations, ..
-            } => write!(f, "Shared ({} users) {}", users, iterations),
+            } => write!(f, "Shared ({users} users) {iterations}"),
             Executor::PerUser { users, iterations } => {
-                write!(f, "PerUser ({} users) {}", users, iterations)
+                write!(f, "PerUser ({users} users) {iterations}")
             }
             Executor::ConstantArrivalRate { rate, duration, .. } => {
-                write!(f, "ConstantArrivalRate {} for {:?}", rate, duration)
+                write!(f, "ConstantArrivalRate {rate} for {duration:?}")
             }
             Executor::RampingUser { stages, .. } => {
                 write!(f, "RampingUser ({} stages)", stages.len())
@@ -128,29 +132,45 @@ impl std::fmt::Display for Executor {
 }
 
 #[async_trait::async_trait]
-pub(crate) trait ExecutionProvider {
+pub(crate) trait ExecutionProvider: Debug {
     fn start_after(&self) -> Duration;
     fn config(&self) -> &Executor;
+    fn clone(&self) -> Box<dyn ExecutionProvider>;
+    fn datastore_modifiers(&self) -> &[Box<dyn DatastoreModifier>];
     async fn execution<'a>(
         &'a self,
-        ctx: &'a mut ExecutionRuntimeCtx,
-    ) -> Box<dyn crate::executor::Executor + 'a>;
+        ctx: &'a ExecutionRuntimeCtx,
+    ) -> Box<dyn crate::executor::Executor<'a> + 'a>;
 }
 
-/// Named collection of executions which should run in parallel to each other.    
+/// Named collection of executions which should run in parallel to each other.
 ///
 /// A scenario is conceptually a test model which simulates a traffic pattern / load.
-/// For more detailed guide on how to organize a scenario and use multiple Execution in a test. Look at [examples](https://github.com/trueleo/loates/examples).  
-pub struct Scenario<'env> {
+/// For more detailed guide on how to organize a scenario and use multiple Execution in a test. Look at [examples](https://github.com/trueleo/loates/examples).
+#[derive(Debug)]
+pub struct Scenario {
     pub(crate) label: Cow<'static, str>,
-    pub(crate) execution_provider: Vec<Box<dyn ExecutionProvider + 'env>>,
+    pub(crate) execution_provider: Vec<Box<dyn ExecutionProvider>>,
 }
 
-impl<'env> Scenario<'env> {
+impl Clone for Scenario {
+    fn clone(&self) -> Self {
+        Self {
+            label: self.label.clone(),
+            execution_provider: self
+                .execution_provider
+                .iter()
+                .map(|x| (*x).clone())
+                .collect(),
+        }
+    }
+}
+
+impl Scenario {
     /// Create a new scenario with a label and a single execution. More execution can be added using [with_executor](Self::with_executor) method
-    pub fn new<Ub>(label: impl Into<Cow<'static, str>>, execution: Execution<'env, Ub>) -> Self
+    pub fn new<Ub>(label: impl Into<Cow<'static, str>>, execution: Execution<Ub>) -> Self
     where
-        Ub: for<'a> AsyncUserBuilder<'a> + 'env,
+        Ub: for<'a> AsyncUserBuilder<'a> + 'static,
     {
         Self {
             label: label.into(),
@@ -159,9 +179,9 @@ impl<'env> Scenario<'env> {
     }
 
     /// Append a new executor to this scenario.
-    pub fn with_executor<Ub>(mut self, execution: Execution<'env, Ub>) -> Self
+    pub fn with_executor<Ub>(mut self, execution: Execution<Ub>) -> Self
     where
-        Ub: for<'a> AsyncUserBuilder<'a> + 'env,
+        Ub: for<'a> AsyncUserBuilder<'a> + 'static,
     {
         self.execution_provider.push(Box::new(execution));
         self
@@ -171,14 +191,23 @@ impl<'env> Scenario<'env> {
 /// Logical execution plan that outlines which user type to spawn during runtime and under which [`Executor`].
 ///
 /// A [`Scenario`] can contain one or more of these *execution plans*.
-pub struct Execution<'env, Ub> {
+pub struct Execution<Ub> {
     start_after: Duration,
     user_builder: Ub,
-    datastore_modifiers: Vec<Box<dyn DatastoreModifier + 'env>>,
+    datastore_modifiers: Vec<Box<dyn DatastoreModifier>>,
     executor: Executor,
 }
 
-impl<'env, Ub> Execution<'env, Ub> {
+impl<Ub> std::fmt::Debug for Execution<Ub> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Execution")
+            .field("start_after", &self.start_after)
+            .field("executor", &self.executor)
+            .finish()
+    }
+}
+
+impl<Ub> Execution<Ub> {
     /// Create a new Execution with a [`user builder`](AsyncUserBuilder) and an [`Executor`]
     pub fn new(user_builder: Ub, executor: Executor) -> Self {
         Self {
@@ -190,9 +219,9 @@ impl<'env, Ub> Execution<'env, Ub> {
     }
 }
 
-impl Execution<'static, ()> {
+impl Execution<()> {
     /// Create a new Execution plan using builder pattern
-    pub fn builder() -> Execution<'static, ()> {
+    pub fn builder() -> Execution<()> {
         Self {
             start_after: Duration::ZERO,
             user_builder: (),
@@ -202,11 +231,11 @@ impl Execution<'static, ()> {
     }
 
     /// Register user builder that will be used in this execution.
-    pub fn with_user_builder<'env, F>(self, user_builder: F) -> Execution<'env, F>
+    pub fn with_user_builder<'env, F>(self, user_builder: F) -> Execution<F>
     where
         F: for<'a> AsyncUserBuilder<'a> + 'env,
     {
-        Execution::<'env, _> {
+        Execution {
             user_builder,
             executor: self.executor,
             datastore_modifiers: self.datastore_modifiers,
@@ -215,14 +244,14 @@ impl Execution<'static, ()> {
     }
 }
 
-impl<'env, Ub> Execution<'env, Ub>
+impl<Ub> Execution<Ub>
 where
-    Ub: for<'a> AsyncUserBuilder<'a> + 'env,
+    Ub: for<'a> AsyncUserBuilder<'a> + 'static,
 {
     /// Append a new datastore initializer to this execution. When perparing to run a scenario, this will be used to initialize [`RuntimeDataStore`](crate::data::RuntimeDataStore) created for this execution.
-    pub fn with_data<T: DatastoreModifier + 'env>(mut self, f: T) -> Self {
+    pub fn with_data<T: DatastoreModifier + 'static>(mut self, f: T) -> Self {
         self.datastore_modifiers
-            .push(Box::new(f) as Box<dyn DatastoreModifier + 'env>);
+            .push(Box::new(f) as Box<dyn DatastoreModifier>);
         self
     }
 
@@ -239,15 +268,15 @@ where
     }
 
     /// Convert this Execution to a Scenario with provided label.
-    pub fn to_scenario(self, label: impl Into<Cow<'static, str>>) -> Scenario<'env> {
+    pub fn to_scenario(self, label: impl Into<Cow<'static, str>>) -> Scenario {
         Scenario::new(label, self)
     }
 }
 
 #[async_trait::async_trait]
-impl<'env, Ub> ExecutionProvider for Execution<'env, Ub>
+impl<Ub> ExecutionProvider for Execution<Ub>
 where
-    Ub: for<'a> AsyncUserBuilder<'a>,
+    Ub: for<'a> AsyncUserBuilder<'a> + 'static,
 {
     fn start_after(&self) -> Duration {
         self.start_after
@@ -257,17 +286,31 @@ where
         &self.executor
     }
 
+    fn clone(&self) -> Box<dyn ExecutionProvider> {
+        Box::new(Self {
+            start_after: self.start_after,
+            user_builder: self.user_builder.clone(),
+            datastore_modifiers: self
+                .datastore_modifiers
+                .iter()
+                .map(|x| (*x).clone())
+                .collect(),
+            executor: self.executor.clone(),
+        })
+    }
+
+    fn datastore_modifiers(&self) -> &[Box<dyn DatastoreModifier>] {
+        &self.datastore_modifiers
+    }
+
     async fn execution<'a>(
         &'a self,
-        ctx: &'a mut ExecutionRuntimeCtx,
-    ) -> Box<dyn crate::executor::Executor + 'a> {
-        for modifiers in self.datastore_modifiers.iter() {
-            ctx.modify(&**modifiers).await;
-        }
+        ctx: &'a ExecutionRuntimeCtx,
+    ) -> Box<dyn crate::executor::Executor<'a> + 'a> {
         let user_builder = &self.user_builder;
         let executor = self.executor.clone();
         Box::new(
-            DataExecutor::<Ub>::new(ctx.datastore_mut(), user_builder, executor)
+            DataExecutor::<Ub>::new(ctx.datastore(), user_builder, executor)
                 .await
                 .unwrap(),
         ) as Box<dyn crate::executor::Executor + '_>

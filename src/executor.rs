@@ -507,10 +507,13 @@ async fn build_users<'a, Ub: AsyncUserBuilder<'a>>(
     user_builder: &'a Ub,
     count: usize,
 ) -> Result<Vec<<Ub as AsyncUserBuilder<'a>>::Output>, Error> {
-    let mut res = vec![];
+    use futures::stream::StreamExt;
+
+    let user_futures = FuturesUnordered::new();
     for _ in 0..count {
-        let user = user_builder.build(store).await?;
-        res.push(user)
+        user_futures.push(user_builder.build(store));
     }
-    Ok(res)
+    let users: Vec<_> = user_futures.collect().await;
+
+    users.into_iter().collect()
 }

@@ -196,7 +196,7 @@ impl<T: Sender + 'static, S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer
 
     fn on_event(&self, event: &tracing::Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
         if event.metadata().target() == USER_TASK {
-            handle_user_event(event, &ctx);
+            let _ = handle_user_event(event, &ctx);
             return;
         }
         if event.metadata().target() == CRATE_NAME {

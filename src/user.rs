@@ -14,7 +14,7 @@ use crate::{data::RuntimeDataStore, error::Error, UserResult};
 ///   For more information, see the [Rust documentation on the Send trait](https://doc.rust-lang.org/std/marker/trait.Send.html).
 ///
 /// ### Note
-/// A concrete implementation of the `User` trait can have references to data from a [RuntimeDataStore]  
+/// A concrete implementation of the `User` trait can have references to data from a [RuntimeDataStore]
 pub trait User: Send {
     fn call(&mut self) -> impl std::future::Future<Output = UserResult> + std::marker::Send;
 
@@ -38,13 +38,13 @@ where
 
 /// Builds a user instance asynchronously.
 /// The type implementing this should also implement Sync as this is shared across runtime executors.
-/// Runtime executors given the type and configuration can request more user in middle of execution.  
+/// Runtime executors given the type and configuration can request more user in middle of execution.
 ///
 /// ### Generic types and their constraints
 ///
 /// - `U` must be a User type and must have a lifetime bound of datastore `'a`.
 #[async_trait::async_trait]
-pub trait AsyncUserBuilder<'a>: Sync {
+pub trait AsyncUserBuilder<'a>: Clone + Sync {
     type Output: User + 'a;
     /// Build a new instance of user
     async fn build(&self, store: &'a RuntimeDataStore) -> Result<Self::Output, Error>;
@@ -53,7 +53,7 @@ pub trait AsyncUserBuilder<'a>: Sync {
 #[async_trait::async_trait]
 impl<'a, F> AsyncUserBuilder<'a> for F
 where
-    F: async_fn_traits::AsyncFn1<&'a RuntimeDataStore> + Sync,
+    F: async_fn_traits::AsyncFn1<&'a RuntimeDataStore> + Sync + Clone,
     <F as async_fn_traits::AsyncFn1<&'a RuntimeDataStore>>::Output: User + 'a,
     for<'b> <F as async_fn_traits::AsyncFn1<&'b RuntimeDataStore>>::OutputFuture: Send,
 {

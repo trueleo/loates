@@ -9,10 +9,8 @@ use loates::tracing::TracerLayer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Registry;
 
-struct MyUser {}
-
-impl User for MyUser {
-    async fn call(&mut self) -> UserResult {
+async fn user_builder(_: &RuntimeDataStore) -> impl User {
+    || async move {
         // In each iteration get the next string
         let res = loates::client::reqwest::Client::new()
             .post("https://httpbin.org/anything")
@@ -34,10 +32,6 @@ impl User for MyUser {
 
         Ok(())
     }
-}
-
-async fn user_builder(_: &RuntimeDataStore) -> impl User {
-    MyUser {}
 }
 
 #[tokio::main]
