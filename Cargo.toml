@@ -27,7 +27,7 @@ web = [
     "dep:ureq",
     "dep:zip",
 ]
-meta = []
+meta = ["web", "ulid"]
 reqwest = ["dep:reqwest"]
 open = ["dep:open"]
 serde = ["dep:serde"]
@@ -63,6 +63,7 @@ serde = { version = "1.0", features = ["derive"], optional = true }
 tower-http = { version = "0.5", features = ["cors"], optional = true }
 static-files = { version = "0.2", optional = true }
 open = { version = "5.2", optional = true }
+ulid = { version = "1.2", optional = true }
 
 [dependencies.reqwest]
 version = "0.12"

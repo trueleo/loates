@@ -1,7 +1,10 @@
 mod message;
+mod server;
+
+use serde::Serialize;
 
 // Enum to represent the role of the cluster node.
-#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy, Serialize)]
 pub enum Role {
     Master,
     #[default]
@@ -11,6 +14,7 @@ pub enum Role {
 /// Configuration for a cluster node.
 #[derive(Debug, Clone)]
 pub struct ClusterConfig {
+    name: String,
     role: Role,
     bind_address: String,
 }
