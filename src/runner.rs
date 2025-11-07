@@ -1,10 +1,15 @@
 use std::future::Future;
 use std::ops::ControlFlow;
+use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use crate::data::DatastoreModifier;
 use crate::data::RuntimeDataStore;
+use crate::db::DatabaseConn;
 use crate::logical::Scenario;
+use crate::meta::build_discovery;
+use crate::meta::message::NodeStatus;
 use crate::meta::ClusterConfig;
 use crate::{CRATE_NAME, SPAN_EXEC, SPAN_SCENARIO};
 
@@ -15,159 +20,137 @@ use async_scoped::{self, Scope};
 use futures::stream::FuturesUnordered;
 use futures::FutureExt;
 use futures::StreamExt;
+use tokio::sync::Mutex;
 use tracing::{event, Instrument};
+use ulid::Ulid;
+
+pub enum RunnerCommand {
+    Start,
+    Stop,
+}
+
+pub struct RunnerState {
+    pub logical: LogicalContext,
+    pub test_id: Ulid,
+    pub status: NodeStatus,
+}
 
 /// The Runner struct is the top level struct for managing and executing series of logical scenarios asynchronously.
 pub struct Runner {
-    logical: LogicalContext,
-    #[cfg(feature = "tui")]
-    enable_tui: bool,
-    #[cfg(feature = "web")]
-    enable_web: bool,
     #[cfg(feature = "meta")]
-    distributed_config: Option<ClusterConfig>,
+    distributed_config: ClusterConfig,
+    db_connection: DatabaseConn,
+    commands_channel: tokio::sync::mpsc::Receiver<RunnerCommand>,
+    _command_sender: tokio::sync::mpsc::Sender<RunnerCommand>,
+    state: Arc<Mutex<RunnerState>>,
 }
 
 impl Runner {
     // Create new instance of Runner with a [Config](crate::config::Config) and list of [Scenario](create::logical::Scenario)
     pub fn new(scenarios: Vec<logical::Scenario>) -> Runner {
-        Self {
+        let (tx, rx) = tokio::sync::mpsc::channel(1024);
+        let state = Arc::new(Mutex::new(RunnerState {
             logical: LogicalContext { scenarios },
-            #[cfg(feature = "tui")]
-            enable_tui: false,
-            #[cfg(feature = "web")]
-            enable_web: false,
+            test_id: Ulid::new(),
+            status: NodeStatus::Idle,
+        }));
+
+        let dir = dirs::data_dir()
+            .unwrap_or_default()
+            .join("loates/result.db");
+
+        let db = DatabaseConn::new(duckdb::Connection::open(dir).unwrap());
+
+        Self {
             #[cfg(feature = "meta")]
-            distributed_config: None,
+            distributed_config: ClusterConfig::default(),
+            db_connection: db,
+            commands_channel: rx,
+            _command_sender: tx,
+            state,
         }
     }
 
-    pub async fn _run(&self) -> Result<(), crate::error::Error> {
-        for (scenario_index, scenario) in self.scenarios().iter().enumerate() {
-            let (tx, rx) = tokio::sync::mpsc::channel(1024);
-            let mut runner = ControlledRun {
-                id: scenario_index,
-                scenario: scenario.clone(),
-                contexts: vec![],
-                is_context_init: false,
-                _receiver: rx,
-            };
-            runner.run_scenario().await?;
+    pub async fn _run(
+        &self,
+        mut run_control: tokio::sync::mpsc::Receiver<RunnerCommand>,
+    ) -> Result<(), crate::error::Error> {
+        async fn run_this(
+            scenarios: Vec<Scenario>,
+            mut rx: tokio::sync::mpsc::Receiver<RunCommand>,
+        ) -> Result<(), crate::error::Error> {
+            for (scenario_index, scenario) in scenarios.iter().enumerate() {
+                let mut runner = ControlledRun {
+                    id: scenario_index,
+                    scenario: scenario.clone(),
+                    contexts: vec![],
+                    is_context_init: false,
+                    _receiver: rx,
+                };
+                runner.run_scenario().await?;
+                rx = runner._receiver
+            }
+            if !scenarios.is_empty() {
+                event!(name: "runner_exit", target: CRATE_NAME, tracing::Level::INFO, "Exit test");
+            }
+            Ok(())
         }
 
-        event!(name: "runner_exit", target: CRATE_NAME, tracing::Level::INFO, "Exit test");
+        let (mut current_task_channel, _rx) = tokio::sync::mpsc::channel(1024);
+        let mut task_handle = run_this(vec![], _rx);
+        let mut mut_task_handle = unsafe { Pin::new_unchecked(&mut task_handle) };
+
+        loop {
+            tokio::select! {
+                task = run_control.recv() => match task {
+                    Some(command) => match command {
+                        RunnerCommand::Start => {
+                            let (tx, rx) = tokio::sync::mpsc::channel(1024);
+                            current_task_channel = tx;
+                            task_handle = run_this(self.scenarios().await, rx);
+                            mut_task_handle = unsafe { Pin::new_unchecked(&mut task_handle) };
+                        }
+                        RunnerCommand::Stop => {
+                            let _ = current_task_channel.send(RunCommand::Stop).await;
+                        }
+                    },
+                    None => {
+                        break;
+                    }
+                },
+                _ = &mut mut_task_handle => {}
+            }
+        }
+
         Ok(())
     }
 
     // Spawn the runner
     pub async fn run(&self) -> Result<(), crate::error::Error> {
-        #[cfg(feature = "tui")]
-        let tui_handle = self.spawn_tui();
-
-        #[cfg(feature = "web")]
-        let web_handle = self.spawn_web();
-
-        #[cfg(feature = "meta")]
-        let meta_handle = self.spawn_meta();
-
-        #[cfg(any(feature = "web", feature = "tui"))]
-        self._run().await?;
-
-        #[cfg(feature = "tui")]
-        if let Some(handle) = tui_handle {
-            let _ = handle.join();
-        }
-
-        #[cfg(feature = "web")]
-        if let Some(handle) = web_handle {
-            let _ = handle.await;
-        }
-
-        #[cfg(feature = "meta")]
-        if let Some(handle) = meta_handle {
-            let _ = handle.await;
-        }
-
+        let (sender, run_control) = tokio::sync::mpsc::channel(1024);
+        let handle = self.spawn_web(sender.clone());
+        self._run(run_control).await?;
+        let _ = handle.join();
         Ok(())
     }
 
-    pub fn scenarios(&self) -> &[logical::Scenario] {
-        &self.logical.scenarios
-    }
-
-    #[cfg(feature = "tui")]
-    pub fn enable_tui(mut self, enable: bool) -> Self {
-        self.enable_tui = enable;
-        self
-    }
-
-    #[cfg(feature = "web")]
-    pub fn enable_web(mut self, enable: bool) -> Self {
-        self.enable_web = enable;
-        self
+    pub async fn scenarios(&self) -> Vec<logical::Scenario> {
+        self.state.lock().await.logical.scenarios.clone()
     }
 
     #[cfg(feature = "meta")]
     pub fn with_distributed(mut self, config: ClusterConfig) -> Self {
-        self.distributed_config = Some(config);
+        self.distributed_config = config;
         self
     }
 
-    #[cfg(feature = "tui")]
-    fn spawn_tui(
-        &self,
-    ) -> Option<std::thread::JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>> {
-        use std::sync::{Arc, Mutex};
-
-        if !self.enable_tui {
-            return None;
-        }
-
-        let (tx, rx) = crate::channel();
-
-        let tracer = crate::tracing::TracerLayer::new(tx);
-        let subscriber = tracing_subscriber::layer::SubscriberExt::with(
-            tracing_subscriber::Registry::default(),
-            tracer,
-        );
-
-        tracing::subscriber::set_global_default(subscriber).unwrap();
-
-        let app = Arc::new(Mutex::new(crate::app::App::new(&self.logical.scenarios)));
-        Some(std::thread::spawn(|| crate::app::tui::run(app, rx)))
-    }
-
-    #[cfg(feature = "web")]
     fn spawn_web(
         &self,
-    ) -> Option<tokio::task::JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>> {
-        use std::sync::{Arc, Mutex};
+        command_sender: tokio::sync::mpsc::Sender<RunnerCommand>,
+    ) -> std::thread::JoinHandle<anyhow::Result<()>> {
+        use std::sync::Arc;
 
-        if !self.enable_web {
-            return None;
-        }
-
-        let (tx, rx) = crate::channel();
-
-        let tracer = crate::tracing::TracerLayer::new(tx);
-        let subscriber = tracing_subscriber::layer::SubscriberExt::with(
-            tracing_subscriber::Registry::default(),
-            tracer,
-        );
-
-        tracing::subscriber::set_global_default(subscriber).unwrap();
-
-        let app = Arc::new(Mutex::new(crate::app::App::new(&self.logical.scenarios)));
-        Some(tokio::spawn(crate::app::web::run(app, rx)))
-    }
-
-    #[cfg(feature = "meta")]
-    fn spawn_meta(
-        &self,
-    ) -> Option<tokio::task::JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>> {
-        use std::sync::{Arc, Mutex};
-
-        let cluster_config = self.distributed_config.clone().unwrap_or_default();
+        use crate::meta::message::{NodeInfo, NodeStatus};
 
         let (tx, rx) = crate::channel();
 
@@ -176,17 +159,77 @@ impl Runner {
             tracing_subscriber::Registry::default(),
             tracer,
         );
-
         tracing::subscriber::set_global_default(subscriber).unwrap();
 
-        let app = Arc::new(Mutex::new(crate::app::App::new(&self.logical.scenarios)));
-        // Some(tokio::spawn(todo!()))
-        todo!()
+        let state = self.state.clone();
+        let distributed_config = self.distributed_config.clone();
+        let db_conn = self.db_connection.try_clone();
+
+        let task = async move {
+            let mut rx = rx;
+            let db_conn = db_conn?;
+
+            let discovery = match build_discovery(&distributed_config).await {
+                Ok(discovery) => discovery,
+                Err(err) => return Err(anyhow::anyhow!("Failed to build discovery: {}", err)),
+            };
+
+            let port = distributed_config
+                .port
+                .unwrap_or(distributed_config.bind_address.port());
+            let endpoint = if let Some(ip) = distributed_config.ip {
+                format!("http://{}:{}", ip, port).parse().unwrap()
+            } else {
+                format!(
+                    "http://{}:{}",
+                    distributed_config.url.as_ref().unwrap(),
+                    port
+                )
+                .parse()
+                .unwrap()
+            };
+
+            let node_info = NodeInfo {
+                name: distributed_config.name,
+                role: distributed_config.role,
+                endpoint,
+                status: NodeStatus::Idle,
+            };
+
+            let app_state = Arc::new(tokio::sync::Mutex::new(crate::meta::server::AppState {
+                discovery,
+                node_info,
+                db: db_conn.try_clone()?,
+                runner_state: state,
+                runner_command: command_sender,
+            }));
+
+            let router = crate::meta::server::router(app_state);
+
+            let db = db_conn.try_clone()?;
+            tokio::spawn(async move {
+                while let Some(message) = rx.recv().await {
+                    let _ = db.write_message_type(&message);
+                }
+            });
+
+            let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
+            let _ = open::that("http://localhost:3000");
+            axum::serve(listener, router.into_make_service()).await?;
+            Ok(())
+        };
+
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap();
+            runtime.block_on(task)
+        })
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RunCommand {
+pub enum RunCommand {
     Start,
     Stop,
 }

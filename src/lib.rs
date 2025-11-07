@@ -15,8 +15,8 @@ amount of simulated load to evaluate its performance and reliability.
 By simulating multiple users accessing the application simultaneously, developers can identify potential bottlenecks, optimize performance, and
 ensure the system can handle expected traffic.
 
-* *Virtual Users* - Implementaion of User trait defines how to simulate this interaction with your application in ways similar to a real users. For more detail explaination look at [`User`](user::User).
-Users of this framework are suppose to implement [`User`](user::User) trait for each variant of user along with their user builder function.
+* *Virtual Users* - Implementation of User trait defines how to simulate this interaction with your application in ways similar to a real users. For more detail explanation look at [`User`](user::User).
+  Users of this framework are supposed to implement [`User`](user::User) trait for each variant of user along with their user builder function.
 
 * *User Builder* - A user builder function defines how to create a User instance. A User can borrow shared data from a [RuntimeDataStore](data::RuntimeDataStore).
 
@@ -150,8 +150,7 @@ Any span(s) inside of a user task is converted to a histogram metric which would
 */
 
 /// User Interfaces and state management for creating live view of execution.
-#[cfg(any(feature = "tui", feature = "web", feature = "meta"))]
-pub mod app;
+pub mod db;
 
 /// Augmented wrapper types for popular crates.
 #[cfg(feature = "reqwest")]
@@ -176,7 +175,9 @@ pub mod tracing;
 pub mod user;
 
 mod executor;
+mod integrations;
 mod meta;
+pub mod metrics;
 
 pub type UserResult = Result<(), crate::error::Error>;
 

@@ -10,8 +10,7 @@ use crate::{
 };
 
 /// Rate of iteration.
-#[derive(Debug, Clone, Copy)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[derive(Debug, Clone, Copy, serde::Serialize)]
 pub struct Rate(
     /// Number of iterations
     pub usize,
@@ -35,10 +34,9 @@ impl std::fmt::Display for Rate {
 }
 
 /// Executor type that is to be used within an execution.
-#[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
-#[cfg_attr(feature = "serde", serde(rename_all_fields = "camelCase"))]
-#[cfg_attr(feature = "serde", serde(tag = "type"))]
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all_fields = "camelCase")]
+#[serde(tag = "type")]
 pub enum Executor {
     /// Excecute the user call only once then exit.
     Once,
@@ -132,7 +130,7 @@ impl std::fmt::Display for Executor {
 }
 
 #[async_trait::async_trait]
-pub(crate) trait ExecutionProvider: Debug {
+pub(crate) trait ExecutionProvider: Debug + Send {
     fn start_after(&self) -> Duration;
     fn config(&self) -> &Executor;
     fn clone(&self) -> Box<dyn ExecutionProvider>;
@@ -170,7 +168,7 @@ impl Scenario {
     /// Create a new scenario with a label and a single execution. More execution can be added using [with_executor](Self::with_executor) method
     pub fn new<Ub>(label: impl Into<Cow<'static, str>>, execution: Execution<Ub>) -> Self
     where
-        Ub: for<'a> AsyncUserBuilder<'a> + 'static,
+        Ub: for<'a> AsyncUserBuilder<'a> + 'static + Send,
     {
         Self {
             label: label.into(),
@@ -181,7 +179,7 @@ impl Scenario {
     /// Append a new executor to this scenario.
     pub fn with_executor<Ub>(mut self, execution: Execution<Ub>) -> Self
     where
-        Ub: for<'a> AsyncUserBuilder<'a> + 'static,
+        Ub: for<'a> AsyncUserBuilder<'a> + 'static + Send,
     {
         self.execution_provider.push(Box::new(execution));
         self
@@ -246,7 +244,7 @@ impl Execution<()> {
 
 impl<Ub> Execution<Ub>
 where
-    Ub: for<'a> AsyncUserBuilder<'a> + 'static,
+    Ub: for<'a> AsyncUserBuilder<'a> + 'static + Send,
 {
     /// Append a new datastore initializer to this execution. When perparing to run a scenario, this will be used to initialize [`RuntimeDataStore`](crate::data::RuntimeDataStore) created for this execution.
     pub fn with_data<T: DatastoreModifier + 'static>(mut self, f: T) -> Self {
@@ -276,7 +274,7 @@ where
 #[async_trait::async_trait]
 impl<Ub> ExecutionProvider for Execution<Ub>
 where
-    Ub: for<'a> AsyncUserBuilder<'a> + 'static,
+    Ub: for<'a> AsyncUserBuilder<'a> + 'static + Send,
 {
     fn start_after(&self) -> Duration {
         self.start_after

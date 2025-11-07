@@ -91,7 +91,7 @@ impl RuntimeDataStore {
 ///
 /// ```
 #[async_trait::async_trait]
-pub trait DatastoreModifier: Sync {
+pub trait DatastoreModifier: Send + Sync {
     async fn init_store(&self, store: &mut RuntimeDataStore);
     fn clone(&self) -> Box<dyn DatastoreModifier>;
 }
@@ -100,7 +100,7 @@ pub trait DatastoreModifier: Sync {
 #[async_trait::async_trait]
 impl<F> DatastoreModifier for F
 where
-    F: for<'a> AsyncFn1<&'a mut RuntimeDataStore, Output = ()> + Sync + Clone + 'static,
+    F: for<'a> AsyncFn1<&'a mut RuntimeDataStore, Output = ()> + Send + Sync + Clone + 'static,
     for<'b> <F as AsyncFn1<&'b mut RuntimeDataStore>>::OutputFuture: Send,
 {
     async fn init_store(&self, store: &mut RuntimeDataStore) {

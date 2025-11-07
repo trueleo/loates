@@ -1,12 +1,10 @@
 use std::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    #[cfg(feature = "web")]
     compile_web_ui().unwrap();
     Ok(())
 }
 
-#[cfg(feature = "web")]
 pub fn compile_web_ui() -> std::io::Result<()> {
     use std::env;
     use std::fs::create_dir_all;

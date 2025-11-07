@@ -128,14 +128,11 @@ pub fn send_request(
     request: reqwest::Request,
     client: &reqwest::Client,
 ) -> impl futures::Future<Output = Result<reqwest::Response, reqwest::Error>> {
-    let host = request.url().host();
+    let host = request.url().host().map(field::display);
     let path = request.url().path();
     let method = request.method();
-    let span = span!(target: USER_TASK, Level::INFO, "reqwest", url = field::Empty, %path, %method);
+    let span = span!(target: USER_TASK, Level::INFO, "reqwest", url = host, %path, %method);
     let _t = span.enter();
-    if let Some(host) = host {
-        span.record("url", field::display(host));
-    }
     use http_body::Body as _;
     if let Some(size) = request.body().and_then(|x| x.size_hint().exact()) {
         event!(name: "sent.gauge", target: USER_TASK, Level::INFO, value = size as f64);
