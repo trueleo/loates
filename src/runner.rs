@@ -1,6 +1,5 @@
 use std::future::Future;
 use std::ops::ControlFlow;
-use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -40,15 +39,12 @@ pub struct Runner {
     #[cfg(feature = "meta")]
     distributed_config: ClusterConfig,
     db_connection: DatabaseConn,
-    commands_channel: tokio::sync::mpsc::Receiver<RunnerCommand>,
-    _command_sender: tokio::sync::mpsc::Sender<RunnerCommand>,
     state: Arc<Mutex<RunnerState>>,
 }
 
 impl Runner {
     // Create new instance of Runner with a [Config](crate::config::Config) and list of [Scenario](create::logical::Scenario)
     pub fn new(scenarios: Vec<logical::Scenario>) -> Runner {
-        let (tx, rx) = tokio::sync::mpsc::channel(1024);
         let state = Arc::new(Mutex::new(RunnerState {
             logical: LogicalContext { scenarios },
             test_id: Ulid::new(),
@@ -65,8 +61,6 @@ impl Runner {
             #[cfg(feature = "meta")]
             distributed_config: ClusterConfig::default(),
             db_connection: db,
-            commands_channel: rx,
-            _command_sender: tx,
             state,
         }
     }
@@ -400,7 +394,7 @@ async fn drop_exec(executors: impl Iterator<Item = Box<dyn crate::executor::Exec
 }
 
 #[derive(Debug, Clone)]
-struct LogicalContext {
+pub struct LogicalContext {
     scenarios: Vec<logical::Scenario>,
 }
 

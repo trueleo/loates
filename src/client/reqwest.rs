@@ -84,6 +84,7 @@ impl Client {
 
 /// Wrapper over [`reqwest::RequestBuilder`].
 #[must_use = "RequestBuilder does nothing until you 'send' it"]
+#[derive(Debug)]
 pub struct RequestBuilder {
     inner: reqwest::RequestBuilder,
 }
