@@ -1,6 +1,7 @@
 use std::{any, collections::HashMap};
 
 use axum::http::HeaderName;
+use bytes::Bytes;
 use reqwest::{header::HeaderValue, Method, StatusCode};
 use url::Url;
 
@@ -17,6 +18,15 @@ enum MayLookup<T> {
     LookupRequire(String),
     LookupOptional(String),
     LookupDefault { name: String, default: T },
+}
+
+impl<T> MayLookup<T> {
+    pub fn get_static(&self) -> Option<&T> {
+        match self {
+            MayLookup::Static(value) => Some(value),
+            _ => None,
+        }
+    }
 }
 
 impl<T: Clone> Clone for MayLookup<T> {
@@ -87,12 +97,17 @@ struct HurlRequest {
 }
 
 #[derive(Debug, Clone)]
+enum ResponseSectionValue {
+    Capture(hurl_core::ast::Capture),
+    Asserts(hurl_core::ast::Assert),
+}
+
+#[derive(Debug, Clone)]
 struct HurlResponse {
     status: StatusCode,
     headers: Vec<(HeaderName, MayLookup<HeaderValue>)>,
     body: MayLookup<bytes::Bytes>,
-    captures: Vec<hurl_core::ast::Capture>,
-    asserts: Vec<hurl_core::ast::Assert>,
+    sections: Vec<ResponseSectionValue>,
 }
 
 #[derive(Debug, Clone)]
@@ -126,19 +141,97 @@ impl crate::user::User for HurlUser {
     }
 }
 
+async fn run_entry(
+    entry: &HurlEntry,
+    vars: &VariableRegistry,
+) -> Result<VariableRegistry, anyhow::Error> {
+    let this_vars = VariableRegistry::default();
+    let hurl_request = entry.request.clone();
+    let hurl_response = entry.response.clone();
+    let client = reqwest::Client::new();
+    let builder = client.request(hurl_request.method.clone(), hurl_request.url.clone());
+    let req = forge_request(&hurl_request, builder, vars)?;
+    let resp = crate::client::reqwest::RequestBuilder::from(req)
+        .send()
+        .await?;
+    let status = resp.status();
+    let headers = resp.headers().clone();
+    let body = resp.bytes().await?;
+
+    check_core_asserts(status, &headers, &body, &hurl_response)?;
+
+    Ok(this_vars)
+}
+
 async fn run_entry_non_telemetry(
     entry: &HurlEntry,
     vars: &VariableRegistry,
 ) -> Result<VariableRegistry, anyhow::Error> {
     let this_vars = VariableRegistry::default();
-    let request = entry.request.clone();
-    let response = entry.response.clone();
+    let hurl_request = entry.request.clone();
+    let hurl_response = entry.response.clone();
     let client = reqwest::Client::new();
-    let builder = client.request(request.method.clone(), request.url.clone());
-    let req = forge_request(&request, builder, vars)?;
+    let builder = client.request(hurl_request.method.clone(), hurl_request.url.clone());
+    let req = forge_request(&hurl_request, builder, vars)?;
     let resp = req.send().await?;
-    //todo check response
+
+    let status = resp.status();
+    let headers = resp.headers().clone();
+    let body = resp.bytes().await?;
+
+    check_core_asserts(status, &headers, &body, &hurl_response)?;
+
     Ok(this_vars)
+}
+
+fn check_core_asserts(
+    status: reqwest::StatusCode,
+    headers: &reqwest::header::HeaderMap,
+    body: &Bytes,
+    hurl_response: &HurlResponse,
+) -> anyhow::Result<()> {
+    if hurl_response.status != status {
+        return Err(anyhow::anyhow!(
+            "Status code mismatch - expected {} actual {}",
+            hurl_response.status,
+            status
+        ));
+    }
+
+    for (header_name, header_value) in hurl_response.headers.iter() {
+        let header_value = header_value
+            .get_static()
+            .ok_or_else(|| anyhow::anyhow!("Base check header value is not statically defined"))?;
+        let resp_header = headers.get(header_name).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Header not found in the response - expected header {}",
+                header_name
+            )
+        })?;
+        if resp_header != header_value {
+            return Err(anyhow::anyhow!(
+                "Header mismatch ({}) - expected {:?} actual {:?}",
+                header_name.as_str(),
+                header_value,
+                resp_header
+            ));
+        }
+    }
+
+    let expected_response = hurl_response
+        .body
+        .get_static()
+        .ok_or_else(|| anyhow::anyhow!("Base check response body is not statically defined"))?;
+    let actual_response = body;
+    if expected_response != actual_response {
+        return Err(anyhow::anyhow!(
+            "Body mismatch - expected {} actual {}",
+            String::from_utf8_lossy(expected_response),
+            String::from_utf8_lossy(actual_response)
+        ));
+    }
+
+    Ok(())
 }
 
 fn map_lookup<'a, T: any::Any>(
@@ -149,17 +242,19 @@ fn map_lookup<'a, T: any::Any>(
         MayLookup::Static(x) => Ok(Some(x)),
         MayLookup::LookupRequire(key) => vars
             .variables
-            .get(&key)
+            .get(&*key)
             .map(|x| x.as_ref().downcast_ref::<T>().unwrap())
+            .map(Some)
             .ok_or(()),
         MayLookup::LookupOptional(key) => vars
             .variables
-            .get(&key)
+            .get(&*key)
             .map(|x| x.as_ref().downcast_ref::<T>().unwrap())
+            .map(Some)
             .ok_or(()),
         MayLookup::LookupDefault { name: key, default } => Ok(vars
             .variables
-            .get(&key)
+            .get(&*key)
             .map(|x| x.as_ref().downcast_ref::<T>().unwrap())
             .or(Some(default))),
     }
@@ -172,7 +267,7 @@ fn forge_request(
 ) -> Result<reqwest::RequestBuilder, anyhow::Error> {
     for (name, value) in &request.headers {
         let val = map_lookup(value, vars)
-            .map_err(|_| return Err(anyhow::anyhow!("Missing required header: {}", name)))?;
+            .map_err(|_| anyhow::anyhow!("Missing required header: {}", name))?;
         if let Some(val) = val {
             builder = builder.header(name, val.clone());
         }
@@ -199,11 +294,11 @@ fn forge_request(
                 resolved_query.push((name, val));
             }
         }
-        builder.query(&resolved_query);
+        builder = builder.query(&resolved_query);
     }
 
     if let Some(basicauth) = &request.basicauth {
-        builder = builder.basic_auth(basicauth.0, basicauth.1.as_ref());
+        builder = builder.basic_auth(&basicauth.0, basicauth.1.as_ref());
     }
 
     let body =
