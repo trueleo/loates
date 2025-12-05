@@ -2,17 +2,26 @@
 // enum Message {}
 
 use serde::{Deserialize, Serialize};
-use ulid::Ulid;
 use url::Url;
 
-use super::Role;
+use crate::runner::NodeStatus;
 
-#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
-pub enum NodeStatus {
-    RunningTest(Ulid),
-    Stopping(Ulid),
+// Enum to represent the role of the cluster node.
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    Master,
     #[default]
-    Idle,
+    Worker,
+}
+
+impl std::fmt::Display for Role {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Role::Master => write!(f, "master"),
+            Role::Worker => write!(f, "worker"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

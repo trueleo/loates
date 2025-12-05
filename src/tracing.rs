@@ -41,7 +41,6 @@ impl Visit for ErrorVisitor {
 
 #[derive(Debug, Clone)]
 struct ScenarioSpanRecord {
-    start_time: DateTime<Utc>,
     run_id: Ulid,
     name: Arc<str>,
 }
@@ -49,7 +48,6 @@ struct ScenarioSpanRecord {
 impl Default for ScenarioSpanRecord {
     fn default() -> Self {
         Self {
-            start_time: Utc::now(),
             run_id: Ulid(0),
             name: Arc::from(""),
         }
@@ -74,7 +72,6 @@ impl tracing::field::Visit for ScenarioSpanRecord {
 
 #[derive(Debug)]
 pub struct ExecutorSpanRecord {
-    start_time: DateTime<Utc>,
     run_id: Ulid,
     scenario_name: Arc<str>,
     id: usize,
@@ -83,7 +80,6 @@ pub struct ExecutorSpanRecord {
 impl ExecutorSpanRecord {
     pub fn new(run_id: Ulid, scenario_name: Arc<str>) -> Self {
         Self {
-            start_time: Utc::now(),
             run_id,
             scenario_name,
             id: 0,
@@ -286,13 +282,14 @@ fn create_scenario_span<S: for<'a> LookupSpan<'a>>(
     attributes: &span::Attributes,
     span: SpanRef<S>,
 ) -> Message {
+    let start_time = Utc::now();
     let mut scenario_span_record = ScenarioSpanRecord::default();
     attributes.values().record(&mut scenario_span_record);
     let mut extentions = span.extensions_mut();
     let message = Message::ScenarioStarted {
         timestamp: Utc::now(),
         run_id: scenario_span_record.run_id,
-        start_time: scenario_span_record.start_time,
+        start_time,
         scenario_name: scenario_span_record.name.clone(),
     };
     extentions.insert(scenario_span_record);

@@ -2,7 +2,7 @@ use std::{collections::HashMap, net::IpAddr, sync::Arc};
 
 use url::Url;
 
-use super::Role;
+use super::message::Role;
 
 #[derive(Debug, Default)]
 pub struct NetworkSnapshot {

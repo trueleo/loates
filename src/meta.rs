@@ -1,34 +1,18 @@
 pub mod discovery;
 pub mod message;
-pub mod server;
 
-use std::{
-    net::{IpAddr, SocketAddr},
-    str::FromStr,
-    sync::Arc,
-};
+use std::{net::SocketAddr, str::FromStr, sync::Arc};
 
-use crate::meta::discovery::{
-    etcd::EtcdDiscovery, mdns::MdnsDiscovery, noconf::StaticDiscovery, DiscoveryService,
-};
+#[cfg(feature = "etcd")]
+use crate::meta::discovery::etcd::EtcdDiscovery;
+#[cfg(feature = "mdns")]
+use crate::meta::discovery::mdns::MdnsDiscovery;
 
-// Enum to represent the role of the cluster node.
-#[derive(Debug, Default, PartialEq, Eq, Clone, Copy, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Role {
-    Master,
-    #[default]
-    Worker,
-}
+use crate::meta::discovery::noconf::StaticDiscovery;
 
-impl std::fmt::Display for Role {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Role::Master => write!(f, "master"),
-            Role::Worker => write!(f, "worker"),
-        }
-    }
-}
+use crate::meta::discovery::DiscoveryService;
+
+use message::Role;
 
 /// Configuration for a cluster node.
 #[derive(Debug, Clone)]
@@ -37,7 +21,7 @@ pub struct ClusterConfig {
     pub role: Role,
     pub bind_address: SocketAddr,
     pub url: Option<url::Url>,
-    pub ip: Option<IpAddr>,
+    pub ip: Option<std::net::IpAddr>,
     pub port: Option<u16>,
     pub discovery_provider: String,
     #[cfg(feature = "etcd")]

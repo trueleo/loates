@@ -5,28 +5,29 @@ use axum::{
     extract::{Path, State},
     http::{Response, StatusCode},
     response::{Html, IntoResponse, Json},
-    routing::{get, post},
+    routing::get,
     Router,
 };
-use futures::{stream::FuturesUnordered, TryStreamExt};
 use static_files::Resource;
 use tokio::sync::Mutex;
 
 use crate::{
     db::DatabaseConn,
-    meta::{
-        discovery::{DiscoveryService, Node},
-        message::NodeStatus,
-    },
-    runner::{self, RunnerCommand},
+    runner::{self, NodeStatus, RunnerCommand},
 };
 
-use super::message::NodeInfo;
+#[cfg(feature = "meta")]
+use crate::meta::{
+    discovery::{DiscoveryService, Node},
+    message::NodeInfo,
+};
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
 pub struct AppState {
+    #[cfg(feature = "meta")]
     pub discovery: Arc<dyn DiscoveryService>,
+    #[cfg(feature = "meta")]
     pub node_info: NodeInfo,
     pub db: DatabaseConn,
     pub runner_state: Arc<Mutex<runner::RunnerState>>,
@@ -37,10 +38,40 @@ async fn health_check() -> impl IntoResponse {
     (StatusCode::OK, "Service is healthy")
 }
 
-async fn node_info(State(state): State<Arc<Mutex<AppState>>>) -> Json<NodeInfo> {
+async fn node_info(State(state): State<Arc<Mutex<AppState>>>) -> Json<serde_json::Value> {
     let app_state = state.lock().await;
-    let mut info = app_state.node_info.clone();
-    info.status = app_state.runner_state.lock().await.status;
+
+    let mut info = if cfg!(feature = "meta") {
+        serde_json::json!({
+            "mode": "distributed",
+        })
+    } else {
+        serde_json::json!({
+            "mode": "single",
+        })
+    };
+
+    let status = app_state.runner_state.lock().await.status;
+
+    #[cfg(feature = "meta")]
+    {
+        let mut node_info = app_state.node_info.clone();
+        node_info.status = status;
+        info.as_object_mut()
+            .unwrap()
+            .insert("info".to_string(), serde_json::to_value(node_info).unwrap());
+    }
+
+    #[cfg(not(feature = "meta"))]
+    {
+        info.as_object_mut().unwrap().insert(
+            "info".to_string(),
+            serde_json::json!({
+                "status": status,
+            }),
+        );
+    }
+
     Json(info)
 }
 
@@ -65,9 +96,12 @@ async fn serve_static(
 }
 
 #[axum::debug_handler]
+#[cfg(feature = "meta")]
 async fn list_nodes(
     State(state): State<Arc<Mutex<AppState>>>,
 ) -> Result<Json<Vec<NodeInfo>>, AppError> {
+    use futures::{stream::FuturesUnordered, TryStreamExt};
+
     let app_state = state.lock().await;
     let snapshot = app_state.discovery.latest_snapshot().await;
     let nodes: FuturesUnordered<_> = snapshot
@@ -91,6 +125,7 @@ async fn list_nodes(
     Ok(Json(nodes?))
 }
 
+#[cfg(feature = "meta")]
 async fn register_node(
     State(state): State<Arc<Mutex<AppState>>>,
     Json(node): Json<Node>,
@@ -102,11 +137,24 @@ async fn register_node(
 
 pub fn router(state: Arc<Mutex<AppState>>) -> Router {
     let static_files = Arc::new(generate());
-    Router::new()
+    let mut router = Router::new();
+
+    router = router
         .route("/health", get(health_check))
-        .route("/status", get(node_info))
-        .route("/nodes", get(list_nodes))
-        .route("/register", post(register_node))
+        .route("/status", get(node_info));
+
+    #[cfg(feature = "meta")]
+    {
+        use axum::routing::post;
+
+        let meta_routes = Router::new()
+            .route("/nodes", get(list_nodes))
+            .route("/register", post(register_node));
+
+        router = router.merge(meta_routes);
+    }
+
+    router
         .with_state(state)
         .route("/*path", get(serve_static))
         .fallback(index)

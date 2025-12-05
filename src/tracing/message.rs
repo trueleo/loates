@@ -102,16 +102,6 @@ pub fn serialize_to_rfc3339_opts<S: serde::Serializer>(
     serde::Serialize::serialize(&t.to_rfc3339_opts(chrono::SecondsFormat::Millis, false), s)
 }
 
-pub fn serialize_to_rfc3339_opts_maybe<S: serde::Serializer>(
-    t: &Option<DateTime<Utc>>,
-    s: S,
-) -> Result<S::Ok, S::Error> {
-    serde::Serialize::serialize(
-        &t.map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::Millis, false)),
-        s,
-    )
-}
-
 pub fn arc_str_serialize<S: serde::Serializer>(s: &Arc<str>, ser: S) -> Result<S::Ok, S::Error> {
     serde::Serialize::serialize(&s.as_ref(), ser)
 }

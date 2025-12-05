@@ -3,16 +3,14 @@ use std::ops::ControlFlow;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use crate::data::DatastoreModifier;
 use crate::data::RuntimeDataStore;
 use crate::db::DatabaseConn;
-use crate::logical::Scenario;
-use crate::meta::build_discovery;
-use crate::meta::message::NodeStatus;
-use crate::meta::ClusterConfig;
-use crate::{CRATE_NAME, SPAN_EXEC, SPAN_SCENARIO};
+use crate::logical::{self, Scenario};
 
-use crate::logical;
+#[cfg(feature = "meta")]
+use crate::meta::{build_discovery, discovery::DiscoveryService, message::NodeInfo, ClusterConfig};
+
+use crate::{CRATE_NAME, SPAN_EXEC, SPAN_SCENARIO};
 
 use anyhow::anyhow;
 use async_scoped::{self, Scope};
@@ -22,6 +20,14 @@ use futures::StreamExt;
 use tokio::sync::Mutex;
 use tracing::{event, Instrument};
 use ulid::Ulid;
+
+#[derive(Debug, Default, Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub enum NodeStatus {
+    RunningTest(Ulid),
+    Stopping(Ulid),
+    #[default]
+    Idle,
+}
 
 pub enum RunnerCommand {
     Start,
@@ -144,8 +150,6 @@ impl Runner {
     ) -> std::thread::JoinHandle<anyhow::Result<()>> {
         use std::sync::Arc;
 
-        use crate::meta::message::{NodeInfo, NodeStatus};
-
         let (tx, rx) = crate::channel();
 
         let tracer = crate::tracing::TracerLayer::new(tx);
@@ -156,49 +160,28 @@ impl Runner {
         tracing::subscriber::set_global_default(subscriber).unwrap();
 
         let state = self.state.clone();
-        let distributed_config = self.distributed_config.clone();
         let db_conn = self.db_connection.try_clone();
+        #[cfg(feature = "meta")]
+        let distributed_config = self.distributed_config.clone();
 
         let task = async move {
             let mut rx = rx;
             let db_conn = db_conn?;
 
-            let discovery = match build_discovery(&distributed_config).await {
-                Ok(discovery) => discovery,
-                Err(err) => return Err(anyhow::anyhow!("Failed to build discovery: {}", err)),
-            };
+            #[cfg(feature = "meta")]
+            let (discovery, node_info) = meta_server_state(distributed_config).await?;
 
-            let port = distributed_config
-                .port
-                .unwrap_or(distributed_config.bind_address.port());
-            let endpoint = if let Some(ip) = distributed_config.ip {
-                format!("http://{}:{}", ip, port).parse().unwrap()
-            } else {
-                format!(
-                    "http://{}:{}",
-                    distributed_config.url.as_ref().unwrap(),
-                    port
-                )
-                .parse()
-                .unwrap()
-            };
-
-            let node_info = NodeInfo {
-                name: distributed_config.name,
-                role: distributed_config.role,
-                endpoint,
-                status: NodeStatus::Idle,
-            };
-
-            let app_state = Arc::new(tokio::sync::Mutex::new(crate::meta::server::AppState {
+            let app_state = Arc::new(tokio::sync::Mutex::new(crate::server::AppState {
+                #[cfg(feature = "meta")]
                 discovery,
+                #[cfg(feature = "meta")]
                 node_info,
                 db: db_conn.try_clone()?,
                 runner_state: state,
                 runner_command: command_sender,
             }));
 
-            let router = crate::meta::server::router(app_state);
+            let router = crate::server::router(app_state);
 
             let db = db_conn.try_clone()?;
             tokio::spawn(async move {
@@ -220,6 +203,41 @@ impl Runner {
             runtime.block_on(task)
         })
     }
+}
+
+#[cfg(feature = "meta")]
+async fn meta_server_state(
+    distributed_config: ClusterConfig,
+) -> anyhow::Result<(Arc<dyn DiscoveryService + 'static>, NodeInfo)> {
+    #[cfg(feature = "meta")]
+    let discovery = match build_discovery(&distributed_config).await {
+        Ok(discovery) => discovery,
+        Err(err) => return Err(anyhow::anyhow!("Failed to build discovery: {}", err)),
+    };
+
+    let port = distributed_config
+        .port
+        .unwrap_or(distributed_config.bind_address.port());
+    let endpoint = if let Some(ip) = distributed_config.ip {
+        format!("http://{}:{}", ip, port).parse().unwrap()
+    } else {
+        format!(
+            "http://{}:{}",
+            distributed_config.url.as_ref().unwrap(),
+            port
+        )
+        .parse()
+        .unwrap()
+    };
+
+    let node_info = NodeInfo {
+        name: distributed_config.name,
+        role: distributed_config.role,
+        endpoint,
+        status: NodeStatus::Idle,
+    };
+
+    Ok((discovery, node_info))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -408,14 +426,6 @@ impl ExecutionRuntimeCtx {
         Self {
             datastore: RuntimeDataStore::default(),
         }
-    }
-
-    pub async fn modify(&mut self, f: &dyn DatastoreModifier) {
-        f.init_store(&mut self.datastore).await;
-    }
-
-    pub fn datastore_mut(&mut self) -> &mut RuntimeDataStore {
-        &mut self.datastore
     }
 
     pub fn datastore(&self) -> &RuntimeDataStore {

@@ -175,8 +175,14 @@ pub mod tracing;
 pub mod user;
 
 mod executor;
+
 mod integrations;
+
+#[cfg(feature = "meta")]
 mod meta;
+
+mod server;
+
 pub mod metrics;
 
 pub type UserResult = Result<(), crate::error::Error>;
