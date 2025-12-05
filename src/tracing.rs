@@ -104,7 +104,6 @@ impl tracing::field::Visit for ExecutorSpanRecord {
 #[derive(Debug)]
 pub struct ExecutorEventRecord {
     users: u64,
-    iterations: u64,
     stage: usize,
     stage_start_time: DateTime<Utc>,
 }
@@ -113,7 +112,6 @@ impl Default for ExecutorEventRecord {
     fn default() -> Self {
         Self {
             users: 0,
-            iterations: 0,
             stage: 0,
             stage_start_time: DateTime::<Utc>::MIN_UTC,
         }
@@ -126,7 +124,6 @@ impl tracing::field::Visit for ExecutorEventRecord {
     fn record_u64(&mut self, field: &Field, value: u64) {
         match field.name() {
             "users" => self.users = value,
-            "iterations" => self.iterations = value,
             "stage" => self.stage = value as usize,
             "stage_start_time" => {
                 self.stage_start_time = Utc.timestamp_millis_opt(value as i64).unwrap()
@@ -424,7 +421,6 @@ fn handle_crate_execution_event<S: Subscriber + for<'a> LookupSpan<'a>>(
         executor_id: executor_span_record.id,
         users: event_record.users,
         stage: event_record.stage,
-        iterations: event_record.iterations,
         stage_start_time: event_record.stage_start_time,
     }
 }

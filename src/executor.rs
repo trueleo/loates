@@ -154,7 +154,7 @@ impl<U: User> Once<U> {
         let exec = async move {
             let spawner = async_scoped::spawner::use_tokio::Tokio;
             let mut scope = unsafe { async_scoped::TokioScope::create(spawner) };
-            event!(target: CRATE_NAME, Level::INFO, users = 1u64, users_max = 1u64);
+            event!(target: CRATE_NAME, Level::INFO, users = 1u64);
             scope.spawn_cancellable(
                 async move {
                     let _ = tx.send(user_call(task).await);
@@ -180,10 +180,7 @@ impl<U: User> Constant<U> {
 
     fn execute(&mut self, tx: crate::Sender<UserResult>) -> ExecutorTask<'_> {
         let users_len = self.users.len();
-        let total_duration_as_secs = self.duration.as_secs();
-        let total_duration = self.duration;
-
-        let end_time = Instant::now() + total_duration;
+        let end_time = Instant::now() + self.duration;
         let tasks = self.users.iter_mut().map(move |user| {
             let tx = tx.clone();
             async move {
@@ -199,13 +196,12 @@ impl<U: User> Constant<U> {
         });
 
         let task = async move {
-            event!(target: CRATE_NAME, Level::INFO, users = users_len, users_max = users_len);
-            event!(target: CRATE_NAME, Level::INFO, total_duration = total_duration_as_secs);
             let spawner = async_scoped::spawner::use_tokio::Tokio;
             let mut scope = unsafe { async_scoped::TokioScope::create(spawner) };
             for task in tasks {
                 scope.spawn_cancellable(task.in_current_span(), || ());
             }
+            event!(target: CRATE_NAME, Level::INFO, users = users_len);
             let _ = scope.collect().await;
         };
 
@@ -233,12 +229,9 @@ impl<U: User> SharedIterations<U> {
     fn execute(&mut self, tx: crate::Sender<UserResult>) -> ExecutorTask<'_> {
         let users_len = self.users.len();
         let iterations = self.iterations;
-        let total_duration_as_secs = self.duration.as_secs();
-
         let end_time = Instant::now() + self.duration;
         let task = async move {
-            event!(target: CRATE_NAME, Level::INFO, users = users_len, users_max = users_len);
-            event!(target: CRATE_NAME, Level::INFO, total_duration = total_duration_as_secs);
+            event!(target: CRATE_NAME, Level::INFO, users = users_len);
             let iterations_completed = AtomicUsize::new(0);
             let tasks = self.users.iter_mut().map(|user| {
                 let tx = tx.clone();
@@ -299,8 +292,7 @@ impl<U: User> PerUserIteration<U> {
         });
 
         let task = async move {
-            event!(target: CRATE_NAME, Level::INFO, users = users_len, users_max = users_len);
-            event!(target: CRATE_NAME, Level::INFO, total_iteration = iterations);
+            event!(target: CRATE_NAME, Level::INFO, users = users_len);
             let spawner = async_scoped::spawner::use_tokio::Tokio;
             let mut scope = unsafe { async_scoped::TokioScope::create(spawner) };
             for task in tasks {
@@ -345,19 +337,17 @@ where
         let user_builder = self.user_builder;
         let pre_allocated_users = self.pre_allocate_users;
         let stages = &*self.stages;
-        let total_duration: u64 = stages.iter().map(|(_, duration)| duration.as_secs()).sum();
         let users = &mut self.users;
 
         let task = async move {
-            event!(target: CRATE_NAME, Level::INFO, total_duration = total_duration);
             *users = build_users(datastore, user_builder, pre_allocated_users)
                 .await
                 .unwrap();
-            event!(target: CRATE_NAME, Level::INFO, users = users.len(), users_max = pre_allocated_users);
+            event!(target: CRATE_NAME, Level::INFO, users = users.len());
 
             for (index, (target_users, duration)) in stages.iter().enumerate() {
-                event!(target: CRATE_NAME, Level::INFO, stage = index + 1, stages = stages.len(), stage_duration = duration.as_secs());
-                event!(target: CRATE_NAME, Level::INFO, users = users.len(), users_max = target_users.max(&pre_allocated_users));
+                let start_time = chrono::Utc::now().timestamp_millis();
+                event!(target: CRATE_NAME, Level::INFO, stage = index + 1, stage_start_time = start_time);
 
                 let len = users.len();
                 if len < *target_users {
@@ -367,7 +357,7 @@ where
                             .unwrap(),
                     );
                 }
-                event!(target: CRATE_NAME, Level::INFO, users = users.len(), users_max = target_users.max(&pre_allocated_users));
+                event!(target: CRATE_NAME, Level::INFO, users = users.len());
 
                 let end_time = Instant::now() + *duration;
                 let tasks = users.iter_mut().map(|user| {
@@ -438,11 +428,12 @@ where
                 .into_iter()
                 .map(Mutex::new)
                 .collect();
-            event!(target: CRATE_NAME, Level::INFO, users = users.len(), users_max = pre_allocated_users);
+            event!(target: CRATE_NAME, Level::INFO, users = users.len());
 
             for (index, (Rate(rate, time_unit), duration)) in stages.iter().enumerate() {
                 let end_time = Instant::now() + *duration;
-                event!(target: CRATE_NAME, Level::INFO, stage = index + 1, stages = stages.len(), stage_duration = duration.as_secs());
+                let start_time = chrono::Utc::now().timestamp_millis();
+                event!(target: CRATE_NAME, Level::INFO, stage = index + 1, stage_start_time = start_time);
 
                 while Instant::now() < end_time {
                     let next_rate_check_time = Instant::now() + *time_unit;
@@ -478,7 +469,7 @@ where
                                 .map(Mutex::new),
                         );
                     }
-                    event!(target: CRATE_NAME, Level::INFO, users = users.len(), users_max = pre_allocated_users);
+                    event!(target: CRATE_NAME, Level::INFO, users = users.len());
 
                     if Instant::now() <= end_time || current_rate < *rate {
                         // Sleep until to make sure we wait before next set of task;

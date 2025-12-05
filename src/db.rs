@@ -73,7 +73,6 @@ CREATE TABLE IF NOT EXISTS executor_updates (
     scenario_name TEXT NOT NULL,
     executor_id INTEGER NOT NULL,
     users BIGINT NOT NULL,
-    iterations BIGINT NOT NULL,
     stage INTEGER NOT NULL,
     stage_start_time TIMESTAMP_TZ NOT NULL
 )
@@ -145,14 +144,12 @@ impl DatabaseConn {
                 metric_set_key,
                 metric_value,
             ),
-
             crate::tracing::Message::ExecutorUpdate {
                 timestamp,
                 run_id,
                 scenario_name,
                 executor_id,
                 users,
-                iterations,
                 stage,
                 stage_start_time,
             } => self.write_executor_update_message(
@@ -161,7 +158,6 @@ impl DatabaseConn {
                 scenario_name,
                 executor_id,
                 users,
-                iterations,
                 stage,
                 stage_start_time,
             ),
@@ -215,6 +211,7 @@ impl DatabaseConn {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn write_executor_update_message(
         &self,
         timestamp: &DateTime<Utc>,
@@ -222,7 +219,6 @@ impl DatabaseConn {
         scenario_name: &Arc<str>,
         executor_id: &usize,
         users: &u64,
-        iterations: &u64,
         stage: &usize,
         stage_start_time: &DateTime<Utc>,
     ) -> Result<(), anyhow::Error> {
@@ -234,7 +230,6 @@ impl DatabaseConn {
                 scenario_name.as_ref(),
                 *executor_id as i64,
                 *users as i64,
-                *iterations as i64,
                 *stage as i64,
                 stage_start_time.to_rfc3339(),
             ],

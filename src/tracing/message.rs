@@ -26,7 +26,6 @@ pub enum Message {
         scenario_name: Arc<str>,
         executor_id: usize,
         users: u64,
-        iterations: u64,
         stage: usize,
         #[serde(serialize_with = "serialize_to_rfc3339_opts")]
         stage_start_time: DateTime<Utc>,

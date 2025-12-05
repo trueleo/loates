@@ -242,19 +242,19 @@ fn map_lookup<'a, T: any::Any>(
         MayLookup::Static(x) => Ok(Some(x)),
         MayLookup::LookupRequire(key) => vars
             .variables
-            .get(&*key)
+            .get(key)
             .map(|x| x.as_ref().downcast_ref::<T>().unwrap())
             .map(Some)
             .ok_or(()),
         MayLookup::LookupOptional(key) => vars
             .variables
-            .get(&*key)
+            .get(key)
             .map(|x| x.as_ref().downcast_ref::<T>().unwrap())
             .map(Some)
             .ok_or(()),
         MayLookup::LookupDefault { name: key, default } => Ok(vars
             .variables
-            .get(&*key)
+            .get(key)
             .map(|x| x.as_ref().downcast_ref::<T>().unwrap())
             .or(Some(default))),
     }
