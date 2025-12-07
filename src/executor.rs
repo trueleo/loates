@@ -508,3 +508,203 @@ async fn build_users<'a, Ub: AsyncUserBuilder<'a>>(
 
     users.into_iter().collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        collections::HashMap,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc, Mutex,
+        },
+    };
+    use tokio::sync::mpsc;
+    use tracing::{field::Visit, Subscriber};
+    use tracing_subscriber::{layer::Context, prelude::*, registry::LookupSpan, Layer};
+
+    #[derive(Debug)]
+    struct MockUser {
+        id: usize,
+        should_fail: bool,
+        call_count: Arc<AtomicUsize>,
+    }
+
+    impl User for MockUser {
+        async fn call(&mut self) -> Result<(), Error> {
+            let call_count = self.call_count.clone();
+            let should_fail = self.should_fail;
+            let id = self.id;
+            call_count.fetch_add(1, Ordering::SeqCst);
+            if should_fail {
+                Err(Error::GenericError(anyhow::anyhow!(
+                    "Mock user {} failed",
+                    id
+                )))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct CapturedEvents {
+        pub events: Arc<Mutex<Vec<CapturedEvent>>>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct CapturedEvent {
+        pub level: Level,
+        pub target: String,
+        pub fields: HashMap<String, String>,
+        pub name: String,
+        pub span_name: Option<String>,
+    }
+
+    struct MyVisitor<'a>(pub &'a mut HashMap<String, String>);
+
+    impl<'a> Visit for MyVisitor<'a> {
+        fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+            self.0
+                .insert(field.name().to_string(), format!("{:?}", value));
+        }
+    }
+
+    impl<S> Layer<S> for CapturedEvents
+    where
+        S: Subscriber + for<'span> LookupSpan<'span>,
+    {
+        fn on_event(&self, event: &tracing::Event<'_>, ctx: Context<'_, S>) {
+            let mut fields = HashMap::new();
+            event.record(&mut MyVisitor(&mut fields));
+
+            let parent_span_name = ctx
+                .current_span()
+                .metadata()
+                .map(|metadata| metadata.name().to_string());
+
+            self.events.lock().unwrap().push(CapturedEvent {
+                level: *event.metadata().level(),
+                target: event.metadata().target().to_string(),
+                fields,
+                name: event.metadata().name().to_string(),
+                span_name: parent_span_name,
+            });
+        }
+    }
+
+    #[tokio::test]
+    async fn test_once_executor_success() {
+        let captured_events = Arc::new(Mutex::new(Vec::new()));
+        let collector = CapturedEvents {
+            events: captured_events.clone(),
+        };
+        let _guard = tracing_subscriber::registry().with(collector).set_default();
+
+        // 2. Setup mock user
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let mock_user = MockUser {
+            id: 1,
+            should_fail: false,
+            call_count: call_count.clone(),
+        };
+
+        let mut once_executor = Once::new(mock_user);
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let executor_task = once_executor.execute(tx);
+        executor_task.await;
+
+        assert_eq!(
+            call_count.load(Ordering::SeqCst),
+            1,
+            "User should be called exactly once"
+        );
+
+        let result = rx.recv().await.expect("Should receive a result");
+        assert!(result.is_ok(), "User call should succeed");
+
+        let events = captured_events.lock().unwrap();
+        assert_eq!(
+            events.len(),
+            1,
+            "Expected 1 tracing event for success scenario"
+        );
+
+        let user_count_event = events.first().expect("Expected user count event");
+        assert_eq!(user_count_event.level, Level::INFO);
+        assert_eq!(user_count_event.target, CRATE_NAME);
+        assert_eq!(user_count_event.fields.get("users"), Some(&"1".to_string()));
+        assert!(
+            user_count_event.span_name.is_none(),
+            "User count event should not be in SPAN_TASK"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_once_executor_failure() {
+        let captured_events = Arc::new(Mutex::new(Vec::new()));
+        let collector = CapturedEvents {
+            events: captured_events.clone(),
+        };
+        let _guard = tracing_subscriber::registry().with(collector).set_default();
+
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let mock_user = MockUser {
+            id: 1,
+            should_fail: true,
+            call_count: call_count.clone(),
+        };
+
+        let mut once_executor = Once::new(mock_user);
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let executor_task = once_executor.execute(tx);
+        executor_task.await;
+
+        assert_eq!(
+            call_count.load(Ordering::SeqCst),
+            1,
+            "User should be called exactly once"
+        );
+
+        let result = rx.recv().await.expect("Should receive a result");
+        assert!(result.is_err(), "User call should fail");
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Mock user 1 failed".to_string()
+        );
+
+        let events = captured_events.lock().unwrap();
+        assert_eq!(
+            events.len(),
+            2,
+            "Expected 2 tracing events for failure scenario"
+        );
+
+        let user_count_event = events
+            .iter()
+            .find(|e| e.fields.get("users") == Some(&"1".to_string()));
+        assert!(user_count_event.is_some(), "Expected user count event");
+        assert!(
+            user_count_event.unwrap().span_name.is_none(),
+            "User count event should not be in SPAN_TASK"
+        );
+
+        let error_event = events.iter().find(|e| e.name == "error");
+        assert!(error_event.is_some(), "Expected an error event");
+        let error_event = error_event.unwrap();
+        assert_eq!(error_event.level, Level::INFO);
+        assert_eq!(error_event.target, CRATE_NAME);
+        assert!(error_event
+            .fields
+            .get("err")
+            .unwrap()
+            .contains("Mock user 1 failed"));
+        assert_eq!(
+            error_event.span_name.as_deref(),
+            Some(SPAN_TASK),
+            "Error event should be in SPAN_TASK"
+        );
+    }
+}
