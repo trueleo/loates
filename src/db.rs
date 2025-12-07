@@ -1,8 +1,9 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Timelike, Utc};
 use duckdb::{
     params,
-    types::{OrderedMap, Value},
+    types::{TimeUnit, Value},
 };
+use serde_json::json;
 use std::sync::Arc;
 use ulid::Ulid;
 
@@ -14,9 +15,8 @@ CREATE TYPE METRIC_TYPE AS ENUM ('gauge', 'counter', 'histogram')
 
 const CREATE_RAW_METRIC_TABLE: &str = r#"
 CREATE TABLE IF NOT EXISTS metrics_raw (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp TIMESTAMP_TZ NOT NULL,
-    run_id UUID NOT NULL,
+    timestamp TIMESTAMPTZ NOT NULL,
+    run_id UHUGEINT NOT NULL,
     scenario_name TEXT NOT NULL,
     executor_id INTEGER NOT NULL,
     metric_name TEXT NOT NULL,
@@ -28,9 +28,8 @@ CREATE TABLE IF NOT EXISTS metrics_raw (
 
 const CREATE_COUNTER_METRICS_TABLE: &str = r#"
 CREATE TABLE IF NOT EXISTS metrics_counter (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp TIMESTAMP_TZ NOT NULL,
-    run_id UUID NOT NULL,
+    timestamp TIMESTAMPTZ NOT NULL,
+    run_id UHUGEINT NOT NULL,
     scenario_name TEXT NOT NULL,
     executor_id INTEGER NOT NULL,
     metric_name TEXT NOT NULL,
@@ -41,9 +40,8 @@ CREATE TABLE IF NOT EXISTS metrics_counter (
 
 const CREATE_GAUGE_METRICS_TABLE: &str = r#"
 CREATE TABLE IF NOT EXISTS metrics_gauge (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp TIMESTAMP_TZ NOT NULL,
-    run_id UUID NOT NULL,
+    timestamp TIMESTAMPTZ NOT NULL,
+    run_id UHUGEINT NOT NULL,
     scenario_name TEXT NOT NULL,
     executor_id INTEGER NOT NULL,
     metric_name TEXT NOT NULL,
@@ -54,9 +52,8 @@ CREATE TABLE IF NOT EXISTS metrics_gauge (
 
 const CREATE_HISTOGRAM_METRICS_TABLE: &str = r#"
 CREATE TABLE IF NOT EXISTS metrics_histogram (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp TIMESTAMP_TZ NOT NULL,
-    run_id UUID NOT NULL,
+    timestamp TIMESTAMPTZ NOT NULL,
+    run_id UHUGEINT NOT NULL,
     scenario_name TEXT NOT NULL,
     executor_id INTEGER NOT NULL,
     metric_name TEXT NOT NULL,
@@ -67,24 +64,22 @@ CREATE TABLE IF NOT EXISTS metrics_histogram (
 
 const CREATE_EXECUTOR_UPDATES_TABLE: &str = r#"
 CREATE TABLE IF NOT EXISTS executor_updates (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp TIMESTAMP_TZ NOT NULL,
-    run_id UUID NOT NULL,
+    timestamp TIMESTAMPTZ NOT NULL,
+    run_id UHUGEINT NOT NULL,
     scenario_name TEXT NOT NULL,
     executor_id INTEGER NOT NULL,
     users BIGINT NOT NULL,
     stage INTEGER NOT NULL,
-    stage_start_time TIMESTAMP_TZ NOT NULL
+    stage_start_time TIMESTAMPTZ NOT NULL
 )
 "#;
 
 const CREATE_MESSAGES_TABLE: &str = r#"
 CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp TIMESTAMP_TZ NOT NULL,
-    run_id UUID NOT NULL,
+    timestamp TIMESTAMPTZ NOT NULL,
+    run_id UHUGEINT NOT NULL,
     scenario_name TEXT NOT NULL,
-    executor_id INTEGER NOT NULL,
+    executor_id INTEGER,
     message_type TEXT NOT NULL,
     payload JSON NOT NULL
 )
@@ -92,12 +87,12 @@ CREATE TABLE IF NOT EXISTS messages (
 
 const INSERT_METRIC: &str = r#"
 INSERT INTO metrics_raw (timestamp, run_id, scenario_name, executor_id, metric_name, metric_type, metric_attributes, metric_value)
-VALUES (?, ?, ?, ?, ?, ?, ?, union_value(? := ?))
+VALUES (?, ?, ?, ?, ?, ?, ?::JSON::MAP(TEXT, TEXT), ?::JSON::UNION(f64 DOUBLE, i64 BIGINT, u64 UBIGINT, duration UBIGINT))
 "#;
 
 const INSERT_EXECUTOR_UPDATE: &str = r#"
-INSERT INTO executor_updates (timestamp, run_id, scenario_name, executor_id, users, iterations, stage, stage_start_time)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO executor_updates (timestamp, run_id, scenario_name, executor_id, users, stage, stage_start_time)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 "#;
 
 const INSERT_MESSAGE: &str = r#"
@@ -115,6 +110,7 @@ impl DatabaseConn {
     }
 
     pub fn create_all_tables(&self) -> Result<(), anyhow::Error> {
+        self.db_conn.execute(CREATE_TYPE_METRIC_TYPE, [])?;
         self.db_conn.execute(CREATE_RAW_METRIC_TABLE, [])?;
         self.db_conn.execute(CREATE_COUNTER_METRICS_TABLE, [])?;
         self.db_conn.execute(CREATE_GAUGE_METRICS_TABLE, [])?;
@@ -176,36 +172,36 @@ impl DatabaseConn {
     ) -> Result<(), anyhow::Error> {
         // just for ownership
         let mut _own_duration = 0;
-        let (metric_union_tag, metric_value): (&str, &dyn duckdb::ToSql) = match metric_value {
-            metrics::Value::Number(x) => ("i64", x),
-            metrics::Value::UnsignedNumber(x) => ("u64", x),
-            metrics::Value::Float(ordered_float) => ("f64", ordered_float.as_ref()),
+        let metric_value: String = match metric_value {
+            metrics::Value::Number(x) => json!({"i64": x}).to_string(),
+            metrics::Value::UnsignedNumber(x) => json!({"u64": *x}).to_string(),
+            metrics::Value::Float(ordered_float) => json!({"f64": ordered_float.0}).to_string(),
             metrics::Value::Duration(duration) => {
                 _own_duration = duration.as_nanos() as u64;
-                ("duration", &_own_duration)
+                json!({"duration": _own_duration}).to_string()
             }
             metrics::Value::String(_) => unreachable!(),
         };
 
-        let attributes: OrderedMap<Value, Value> = metric_set_key
+        let mut attributes = metric_set_key
             .attributes
             .iter()
-            .map(|x| (Value::Text(x.0.to_string()), Value::Text(x.1.to_string())))
-            .collect::<Vec<_>>()
-            .into();
+            .fold(String::from("{"), |json, (name, value)| {
+                json + &format!("\"{}\": \"{}\", ", name, value)
+            });
+        attributes = attributes.trim_end_matches(", ").to_string() + "}";
 
         self.db_conn.execute(
             INSERT_METRIC,
-            params![
-                timestamp,
-                run_id.to_string(),
-                scenario_name.as_ref(),
-                *executor_id as i64,
-                metric_set_key.name,
-                metric_set_key.metric_type.to_string(),
-                duckdb::types::Value::Map(attributes),
-                metric_union_tag,
-                metric_value,
+            [
+                Value::Timestamp(TimeUnit::Nanosecond, timestamp.nanosecond() as i64),
+                Value::HugeInt(run_id.0 as i128),
+                Value::Text(scenario_name.to_string()),
+                Value::Int(*executor_id as i32),
+                Value::Text(metric_set_key.name.to_string()),
+                Value::Text(metric_set_key.metric_type.to_string()),
+                Value::Text(attributes),
+                Value::Text(metric_value),
             ],
         )?;
         Ok(())
@@ -246,11 +242,20 @@ impl DatabaseConn {
         let payload = serde_json::to_string(message)
             .map_err(|e| anyhow::anyhow!("Failed to serialize message: {}", e))?;
 
-        let (run_id, scenario_name) = Self::extract_common_fields(message);
+        let (run_id, scenario_name, executor_id) = Self::extract_common_fields(message);
 
         self.db_conn.execute(
             INSERT_MESSAGE,
-            params![timestamp, run_id, scenario_name, message_type, payload],
+            [
+                Value::Timestamp(TimeUnit::Nanosecond, timestamp.nanosecond() as i64),
+                Value::HugeInt(run_id.map(|x| x.0 as i128).unwrap()),
+                Value::Text(scenario_name.unwrap()),
+                executor_id
+                    .map(|x| Value::Int(x as i32))
+                    .unwrap_or(Value::Null),
+                Value::Text(message_type),
+                Value::Text(payload),
+            ],
         )?;
         Ok(())
     }
@@ -273,35 +278,134 @@ impl DatabaseConn {
     /// Extract shared fields for optional storage in messages table
     fn extract_common_fields(
         message: &crate::tracing::Message,
-    ) -> (Option<String>, Option<String>) {
-        match message {
-            crate::tracing::Message::ScenarioStarted {
-                run_id,
-                scenario_name,
-                ..
-            }
-            | crate::tracing::Message::ScenarioEnded {
-                run_id,
-                scenario_name,
-                ..
-            }
-            | crate::tracing::Message::ExecutorStart {
-                run_id,
-                scenario_name,
-                ..
-            }
-            | crate::tracing::Message::ExecutorEnd {
-                run_id,
-                scenario_name,
-                ..
-            } => (Some(run_id.to_string()), Some(scenario_name.to_string())),
-            _ => (None, None),
-        }
+    ) -> (Option<Ulid>, Option<String>, Option<usize>) {
+        use crate::tracing::Message;
+
+        let run_id = match message {
+            Message::Metric { run_id, .. } => Some(*run_id),
+            Message::ExecutorUpdate { run_id, .. } => Some(*run_id),
+            Message::ScenarioStarted { run_id, .. } => Some(*run_id),
+            Message::ScenarioEnded { run_id, .. } => Some(*run_id),
+            Message::ExecutorStart { run_id, .. } => Some(*run_id),
+            Message::ExecutorEnd { run_id, .. } => Some(*run_id),
+            _ => None,
+        };
+
+        let scenario_name = match message {
+            Message::ScenarioStarted { scenario_name, .. } => Some(scenario_name.to_string()),
+            Message::ScenarioEnded { scenario_name, .. } => Some(scenario_name.to_string()),
+            Message::ExecutorStart { scenario_name, .. } => Some(scenario_name.to_string()),
+            Message::ExecutorEnd { scenario_name, .. } => Some(scenario_name.to_string()),
+            Message::Metric { scenario_name, .. } => Some(scenario_name.to_string()),
+            Message::ExecutorUpdate { scenario_name, .. } => Some(scenario_name.to_string()),
+            _ => None,
+        };
+
+        let executor_id = match message {
+            Message::ExecutorStart { id, .. } => Some(*id),
+            Message::ExecutorEnd { id, .. } => Some(*id),
+            Message::Metric { executor_id, .. } => Some(*executor_id),
+            Message::ExecutorUpdate { executor_id, .. } => Some(*executor_id),
+            _ => None,
+        };
+
+        (run_id, scenario_name, executor_id)
     }
 
     pub fn try_clone(&self) -> Result<Self, anyhow::Error> {
         Ok(Self {
             db_conn: self.db_conn.try_clone()?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{sync::Arc, time::Duration};
+    use ulid::Ulid;
+
+    use crate::{
+        db::DatabaseConn,
+        metrics::{MetricSetKey, MetricType, Value},
+        tracing::Message,
+    };
+
+    fn messages() -> Vec<Message> {
+        let scenario_name: Arc<str> = Arc::from("scenario1");
+
+        vec![
+            Message::ScenarioStarted {
+                run_id: Ulid::default(),
+                scenario_name: scenario_name.clone(),
+                timestamp: chrono::Utc::now(),
+                start_time: chrono::Utc::now(),
+            },
+            Message::ExecutorStart {
+                run_id: Ulid::default(),
+                scenario_name: scenario_name.clone(),
+                timestamp: chrono::Utc::now(),
+                id: 1,
+                start_time: chrono::Utc::now(),
+            },
+            Message::ExecutorUpdate {
+                timestamp: chrono::Utc::now(),
+                run_id: Ulid::default(),
+                scenario_name: scenario_name.clone(),
+                executor_id: 1,
+                users: 10,
+                stage: 0,
+                stage_start_time: chrono::DateTime::<chrono::Utc>::MIN_UTC,
+            },
+            Message::Metric {
+                timestamp: chrono::Utc::now(),
+                run_id: Ulid::default(),
+                scenario_name: scenario_name.clone(),
+                executor_id: 1,
+                metric_set_key: MetricSetKey {
+                    name: "task",
+                    metric_type: MetricType::Gauge,
+                    attributes: vec![],
+                },
+                metric_value: Value::Duration(Duration::from_secs(1)),
+            },
+            Message::ExecutorEnd {
+                run_id: Ulid::default(),
+                scenario_name: scenario_name.clone(),
+                timestamp: chrono::Utc::now(),
+                id: 1,
+                end_time: chrono::Utc::now(),
+            },
+            Message::ScenarioEnded {
+                run_id: Ulid::default(),
+                scenario_name: scenario_name.clone(),
+                timestamp: chrono::Utc::now(),
+                end_time: chrono::Utc::now(),
+            },
+        ]
+    }
+
+    #[tokio::test]
+    async fn test_db_write_testrun() {
+        let db = DatabaseConn::new(duckdb::Connection::open_in_memory().unwrap());
+        db.create_all_tables().unwrap();
+        for message in messages() {
+            db.write_message_type(&message).unwrap();
+        }
+
+        fn row_count(table_name: &str, conn: &duckdb::Connection) -> i64 {
+            conn.query_row(&format!("select count(*) from {}", table_name), [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap()
+        }
+
+        let metrics_row_count = row_count("metrics_raw", &db.db_conn);
+        assert_eq!(metrics_row_count, 1);
+
+        let executor_update_count = row_count("executor_updates", &db.db_conn);
+        assert_eq!(executor_update_count, 1);
+
+        let generic_message_count = row_count("messages", &db.db_conn);
+        assert_eq!(generic_message_count, 4);
     }
 }
