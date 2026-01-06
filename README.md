@@ -1,3 +1,11 @@
+> ⚠️ **Project moved**
+>
+> This project has moved to Codeberg:  
+> 👉 https://codeberg.org/stonebucklabs/loates  
+>
+> This GitHub repository is kept for historical/reference purposes only.
+
+
 # Loates
 
 Loates is a blazingly fast 🚀 load testing library for Rust, with focus on ease of use and flexiblity.
