@@ -95,6 +95,7 @@ impl Message {
     }
 }
 
+// Serialize to RFC3339 format with milliseconds precision ( example: 2023-03-20T14:30:00.123+00:00)
 pub fn serialize_to_rfc3339_opts<S: serde::Serializer>(
     t: &DateTime<Utc>,
     s: S,

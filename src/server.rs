@@ -1,10 +1,12 @@
 use std::{collections::HashMap, sync::Arc};
 
+mod apis;
+
 use axum::{
     body::{Body, Bytes},
     extract::{Path, State},
     http::{Response, StatusCode},
-    response::{Html, IntoResponse, Json},
+    response::{Html, IntoResponse},
     routing::get,
     Router,
 };
@@ -13,14 +15,11 @@ use tokio::sync::Mutex;
 
 use crate::{
     db::DatabaseConn,
-    runner::{self, NodeStatus, RunnerCommand},
+    runner::{self, RunnerCommand},
 };
 
 #[cfg(feature = "meta")]
-use crate::meta::{
-    discovery::{DiscoveryService, Node},
-    message::NodeInfo,
-};
+use crate::meta::{discovery::DiscoveryService, message::NodeInfo};
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
@@ -32,47 +31,6 @@ pub struct AppState {
     pub db: DatabaseConn,
     pub runner_state: Arc<Mutex<runner::RunnerState>>,
     pub runner_command: tokio::sync::mpsc::Sender<RunnerCommand>,
-}
-
-async fn health_check() -> impl IntoResponse {
-    (StatusCode::OK, "Service is healthy")
-}
-
-async fn node_info(State(state): State<Arc<Mutex<AppState>>>) -> Json<serde_json::Value> {
-    let app_state = state.lock().await;
-
-    let mut info = if cfg!(feature = "meta") {
-        serde_json::json!({
-            "mode": "distributed",
-        })
-    } else {
-        serde_json::json!({
-            "mode": "single",
-        })
-    };
-
-    let status = app_state.runner_state.lock().await.status;
-
-    #[cfg(feature = "meta")]
-    {
-        let mut node_info = app_state.node_info.clone();
-        node_info.status = status;
-        info.as_object_mut()
-            .unwrap()
-            .insert("info".to_string(), serde_json::to_value(node_info).unwrap());
-    }
-
-    #[cfg(not(feature = "meta"))]
-    {
-        info.as_object_mut().unwrap().insert(
-            "info".to_string(),
-            serde_json::json!({
-                "status": status,
-            }),
-        );
-    }
-
-    Json(info)
 }
 
 async fn index(static_files: State<Arc<HashMap<&'static str, Resource>>>) -> Html<&'static [u8]> {
@@ -95,61 +53,24 @@ async fn serve_static(
     }
 }
 
-#[axum::debug_handler]
-#[cfg(feature = "meta")]
-async fn list_nodes(
-    State(state): State<Arc<Mutex<AppState>>>,
-) -> Result<Json<Vec<NodeInfo>>, AppError> {
-    use futures::{stream::FuturesUnordered, TryStreamExt};
-
-    let app_state = state.lock().await;
-    let snapshot = app_state.discovery.latest_snapshot().await;
-    let nodes: FuturesUnordered<_> = snapshot
-        .nodes
-        .iter()
-        .map(|node| async move {
-            let status: NodeStatus = reqwest::get(node.endpoint().join("/status").unwrap())
-                .await?
-                .json()
-                .await?;
-            Ok(NodeInfo {
-                name: node.name.clone(),
-                role: node.role,
-                endpoint: node.endpoint(),
-                status,
-            })
-        })
-        .collect();
-
-    let nodes: Result<Vec<NodeInfo>, anyhow::Error> = nodes.try_collect().await;
-    Ok(Json(nodes?))
-}
-
-#[cfg(feature = "meta")]
-async fn register_node(
-    State(state): State<Arc<Mutex<AppState>>>,
-    Json(node): Json<Node>,
-) -> Result<impl IntoResponse, AppError> {
-    let state = state.lock().await;
-    state.discovery.register(node.clone()).await?;
-    Ok((StatusCode::CREATED, Json(node)))
-}
-
 pub fn router(state: Arc<Mutex<AppState>>) -> Router {
     let static_files = Arc::new(generate());
     let mut router = Router::new();
 
     router = router
-        .route("/health", get(health_check))
-        .route("/status", get(node_info));
+        .route("/health", get(apis::health_check))
+        .route("/status", get(apis::node_info))
+        .route("/updates/{run_id}/{scenario}", get(apis::run_updates));
+        .route("/command/{run_id}", get(apis::run_command));
+    // .route("/runs", get(apis::runs));
 
     #[cfg(feature = "meta")]
     {
         use axum::routing::post;
 
         let meta_routes = Router::new()
-            .route("/nodes", get(list_nodes))
-            .route("/register", post(register_node));
+            .route("/nodes", get(apis::list_nodes))
+            .route("/register", post(apis::register_node));
 
         router = router.merge(meta_routes);
     }

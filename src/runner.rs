@@ -29,6 +29,8 @@ pub enum NodeStatus {
     Idle,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum RunnerCommand {
     Start,
     Stop,
@@ -96,6 +98,7 @@ impl Runner {
             Ok(())
         }
 
+        let runner_state = self.state.clone();
         let (mut current_task_channel, _rx) = tokio::sync::mpsc::channel(1024);
         let mut task_handle = run_this(vec![], _rx);
         let mut mut_task_handle = unsafe { Pin::new_unchecked(&mut task_handle) };
@@ -109,6 +112,7 @@ impl Runner {
                             current_task_channel = tx;
                             task_handle = run_this(self.scenarios().await, rx);
                             mut_task_handle = unsafe { Pin::new_unchecked(&mut task_handle) };
+                            runner_state.lock().await.status = NodeStatus::RunningTest(Ulid::new());
                         }
                         RunnerCommand::Stop => {
                             let _ = current_task_channel.send(RunCommand::Stop).await;
@@ -188,6 +192,12 @@ impl Runner {
                 while let Some(message) = rx.recv().await {
                     let _ = db.write_message_type(&message);
                 }
+            });
+            let db = db_conn.try_clone()?;
+
+            tokio::task::spawn_blocking(move || loop {
+                let _ = db.db_conn.execute(crate::db::MERGE_METRIC_COUNTER, []);
+                std::thread::sleep(std::time::Duration::from_secs(2));
             });
 
             let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;

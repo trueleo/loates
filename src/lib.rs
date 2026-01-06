@@ -153,7 +153,6 @@ Any span(s) inside of a user task is converted to a histogram metric which would
 pub mod db;
 
 /// Augmented wrapper types for popular crates.
-#[cfg(feature = "reqwest")]
 pub mod client;
 
 /// Data layer for shared data
@@ -204,9 +203,6 @@ use tokio::sync::mpsc::unbounded_channel as channel;
 use tokio::sync::mpsc::UnboundedReceiver as Receiver;
 #[allow(unused)]
 use tokio::sync::mpsc::UnboundedSender as Sender;
-
-#[cfg(feature = "reqwest")]
-pub use reqwest;
 
 /// A const variable that can be used to define custom traces in your test. The tracing layer provided by this crate will ignore any events in user call that are not of this target.
 pub const USER_TASK: &str = "user_event";

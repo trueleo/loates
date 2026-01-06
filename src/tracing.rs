@@ -267,13 +267,17 @@ impl<T: Sender + 'static, S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer
 
         if span.metadata().name() == SPAN_TASK {
             let message = close_task_span(span);
-            self.stats_sender.send(message);
+            for message in message {
+                self.stats_sender.send(message);
+            }
             return;
         }
 
         if span.metadata().target() == USER_TASK {
             let message = close_task_span(span);
-            self.stats_sender.send(message);
+            for message in message {
+                self.stats_sender.send(message);
+            }
         }
     }
 }
@@ -449,21 +453,35 @@ fn close_execution_span<S: Subscriber + for<'a> LookupSpan<'a>>(span: SpanRef<S>
 
 fn close_task_span<'a, S: Subscriber + for<'lookup> LookupSpan<'lookup>>(
     span: SpanRef<'a, S>,
-) -> Message {
+) -> [Message; 2] {
     let mut extention = span.extensions_mut();
     let task_span_record = extention.remove::<TaskSpanRecord>().unwrap();
     let time_delta = Utc::now() - task_span_record.start_time;
     let time_delta = time_delta.abs().to_std().unwrap();
-    Message::Metric {
-        timestamp: Utc::now(),
-        run_id: task_span_record.run_id,
-        scenario_name: task_span_record.scenario_id.clone(),
-        executor_id: task_span_record.execution_id,
-        metric_set_key: MetricSetKey {
-            name: "task",
-            metric_type: MetricType::Gauge,
-            attributes: task_span_record.attributes,
+    [
+        Message::Metric {
+            timestamp: Utc::now(),
+            run_id: task_span_record.run_id,
+            scenario_name: task_span_record.scenario_id.clone(),
+            executor_id: task_span_record.execution_id,
+            metric_set_key: MetricSetKey {
+                name: "task",
+                metric_type: MetricType::Gauge,
+                attributes: task_span_record.attributes.clone(),
+            },
+            metric_value: Value::Duration(time_delta),
         },
-        metric_value: Value::Duration(time_delta),
-    }
+        Message::Metric {
+            timestamp: Utc::now(),
+            run_id: task_span_record.run_id,
+            scenario_name: task_span_record.scenario_id.clone(),
+            executor_id: task_span_record.execution_id,
+            metric_set_key: MetricSetKey {
+                name: "task",
+                metric_type: MetricType::Histogram,
+                attributes: task_span_record.attributes,
+            },
+            metric_value: Value::Duration(time_delta),
+        },
+    ]
 }
